@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-obsidian-local"
+version = "0.1.0"
+description = "Phase 1 foundation: Telegram intake bot with idempotent Obsidian pipeline"
+requires-python = ">=3.12"
+dependencies = [
+  "aiogram==3.26.0"
+]
+
+[tool.setuptools]
+packages = ["src", "src.bot", "src.pipeline", "src.obsidian", "src.rag", "src.parsers", "src.infra"]

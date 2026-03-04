@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data
+.data/
+local_obsidian_inbox/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

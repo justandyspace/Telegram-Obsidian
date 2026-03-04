@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "src.main", "--role", "bot"]
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - couchdb
+    volumes:
+      - ./local_obsidian_inbox:/data/vault
+      - ./.data/state:/srv/obsidian-bot/state
+      - ./.data/cache:/srv/obsidian-bot/cache
+      - ./.data/index:/srv/obsidian-bot/index
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 8080), timeout=2); s.sendall(b'GET /health HTTP/1.0\\r\\n\\r\\n'); data=s.recv(128); s.close(); raise SystemExit(0 if b'200 OK' in data else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "src.main", "--role", "worker"]
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - couchdb
+    volumes:
+      - ./local_obsidian_inbox:/data/vault
+      - ./.data/state:/srv/obsidian-bot/state
+      - ./.data/cache:/srv/obsidian-bot/cache
+      - ./.data/index:/srv/obsidian-bot/index
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 8081), timeout=2); s.sendall(b'GET /health HTTP/1.0\\r\\n\\r\\n'); data=s.recv(128); s.close(); raise SystemExit(0 if b'200 OK' in data else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  couchdb:
+    image: couchdb:3.3
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: ${COUCHDB_USER}
+      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+    ports:
+      - "5984:5984"
+
+volumes:
+  couchdb_data:
