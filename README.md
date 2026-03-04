@@ -1,75 +1,67 @@
-# Telegram -> Obsidian (Production Baseline)
+# telegram-obsidian-local
 
-Production-ready Telegram ingest bot with strict tenant isolation, resilient worker processing, SSRF-protected URL parsing, and RAG search/summary.
+Production-first Telegram bot для сохранения контента в Obsidian с очередью задач, tenant-изоляцией и RAG-поиском/саммари.
 
-## Architecture
+## Почему этот проект
 
-Layers:
-- `src/bot`: Telegram auth, routing, commands.
-- `src/pipeline`: normalize, dedup, action parsing, queue submission.
-- `src/parsers`: URL extraction and guarded fetch/parsing.
-- `src/infra`: config, health, logging, resilience, SQLite state store.
-- `src/obsidian`: deterministic file routing and managed block writing.
-- `src/rag`: chunking, embeddings, index store, retrieval/grounded answers.
-- `src/main.py` / `src/worker.py`: role entrypoints.
+`telegram-obsidian-local` принимает сообщения и ссылки из Telegram, безопасно обрабатывает контент и сохраняет заметки в Obsidian-совместимую структуру. Проект рассчитан на стабильную работу в self-hosted окружении: с health-check'ами, ретраями, восстановлением зависших задач и операционными runbook'ами.
 
-Isolation model (`TENANT_MODE=multi`):
-- Vault: `VAULT_PATH/<tenant_id>/...`
-- Index: `INDEX_DIR/<tenant_id>/...`
-- Queue + notes: tenant-scoped keys/queries in SQLite
-- Bot commands (`/status`, `/find`, `/summary`, `/retry`) filtered by tenant
+## Ключевые возможности
 
-## Security controls
+- Строгая авторизация по allowlist (`TELEGRAM_ALLOWED_USER_ID(S)`).
+- Поддержка режимов Telegram: `polling`, `webhook`, `auto`.
+- Tenant-изоляция хранилищ (`VAULT_PATH`, `INDEX_DIR`, SQLite state).
+- Идемпотентная очередь задач и ретраи с exponential backoff.
+- Автовосстановление stuck jobs.
+- Безопасный URL ingest с SSRF-защитой.
+- RAG: semantic find + grounded summary (`/find`, `/summary`).
+- Встроенные health endpoints для bot/worker.
 
-- Strict allowlist auth (`TELEGRAM_ALLOWED_USER_ID(S)`).
-- Webhook hardening:
-  - `WEBHOOK_SECRET_TOKEN` required for webhook-enabled runtime.
-  - minimum secret length enforced.
-- SSRF protection:
-  - only `http/https`
-  - no URL credentials
-  - blocks localhost/internal/private/link-local/loopback IPs
-  - validates redirect targets
-  - bounded body size
-  - retry/backoff + circuit-breaker for unstable upstreams
-- Secrets excluded by default in `.gitignore` and `.dockerignore`.
+## Технологии
 
-## Reliability controls
+- Python 3.12+
+- aiogram 3
+- aiohttp
+- BeautifulSoup / pypdf / youtube-transcript-api
+- Gemini API (опционально, для embedding/generation)
+- SQLite
+- Docker Compose
 
-- Idempotent enqueue by `(tenant_id, idempotency_key)`.
-- Worker retries with exponential backoff.
-- Automatic stuck job recovery (`processing` -> `retry`) on interval.
-- Startup SQLite integrity check.
-- Legacy table migration into current schema.
-- Schema versioning via `schema_migrations`.
+## Структура проекта
 
-## Environment
+- `src/main.py` — entrypoint ролей `bot` и `worker`.
+- `src/bot` — роутинг Telegram и команды.
+- `src/pipeline` — нормализация, действия, очередь.
+- `src/parsers` — парсинг URL и guarded fetch.
+- `src/obsidian` — маршрутизация и запись заметок.
+- `src/rag` — индексация, retrieval и ответы.
+- `src/infra` — конфиг, логирование, health, storage.
+- `tests` — автотесты.
+- `deploy` — deployment artifacts (включая systemd unit-файлы).
 
-Copy `.env.example` to `.env` and set:
-- `TELEGRAM_TOKEN`
-- `TELEGRAM_ALLOWED_USER_ID` or `TELEGRAM_ALLOWED_USER_IDS`
-- `GEMINI_API_KEY` (optional; hash embeddings fallback exists)
-- `WEBHOOK_*` + strong `WEBHOOK_SECRET_TOKEN` if webhook mode is enabled
-
-Important worker knobs:
-- `WORKER_POLL_SECONDS` (default `2`)
-- `WORKER_RECOVERY_INTERVAL_SECONDS` (default `30`)
-- `WORKER_STUCK_TIMEOUT_SECONDS` (default `600`)
-
-## Local run
+## Быстрый старт (локально)
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements-dev.txt
+cp .env.example .env
+```
+
+Запустите bot и worker в отдельных терминалах:
+
+```bash
 python -m src.main --role bot
 python -m src.main --role worker
 ```
 
-Windows helper:
-- `run_local.ps1`
+Для Windows можно использовать:
 
-## Docker Compose (recommended)
+```powershell
+.\run_local.ps1
+```
+
+## Быстрый старт (Docker Compose)
 
 ```bash
 docker compose up -d --build bot worker
@@ -77,11 +69,48 @@ docker compose ps
 docker compose logs -f --tail=200 bot worker
 ```
 
-Health checks:
-- Bot: `127.0.0.1:8080`
-- Worker: `127.0.0.1:8081`
+Health endpoints:
 
-## Quality gates
+- Bot: `127.0.0.1:8080/health`
+- Worker: `127.0.0.1:8081/health`
+
+## Обязательные переменные окружения
+
+Минимальный набор в `.env`:
+
+- `TELEGRAM_TOKEN`
+- `TELEGRAM_ALLOWED_USER_ID` или `TELEGRAM_ALLOWED_USER_IDS`
+- `TENANT_MODE` (`single` или `multi`)
+- `VAULT_PATH`, `STATE_DIR`, `CACHE_DIR`, `INDEX_DIR`
+
+Опционально для RAG-качества:
+
+- `GEMINI_API_KEY`
+- `GEMINI_EMBED_MODEL`
+- `GEMINI_GENERATION_MODEL`
+
+Для webhook режима:
+
+- `WEBHOOK_BASE_URL`
+- `WEBHOOK_SECRET_TOKEN` (длинный случайный секрет)
+
+## Команды Telegram
+
+- `/start` — справка и список возможностей.
+- `/status` — состояние очереди, ошибки, статистика RAG и storage.
+- `/find <query>` — semantic/keyword поиск по заметкам.
+- `/summary <question>` — grounded summary по индексу.
+- `/retry <job_id_or_prefix>` — ручной ретрай задачи.
+
+Сообщения можно отправлять с тегами действий:
+
+- `#save`
+- `#summary`
+- `#task`
+- `#resummarize`
+- `#translate`
+
+## Качество и проверки
 
 ```bash
 ruff check src tests
@@ -91,10 +120,23 @@ pip-audit -r requirements.txt
 pytest -q
 ```
 
-CI is configured in `.github/workflows/ci.yml`.
+CI: `.github/workflows/ci.yml`
 
-## Operations
+## Безопасность и надежность
 
-- Runtime runbook: `RUNBOOK.md`
-- Incident response: `INCIDENT_PLAYBOOK.md`
-- Deploy checklist: `DEPLOYMENT_CHECKLIST.md`
+- Блокировка неавторизованных пользователей Telegram.
+- SSRF guard: только `http/https`, запрет private/internal ranges, валидация редиректов.
+- Идемпотентность задач по ключу + tenant scope.
+- Периодический recovery зависших задач.
+- Проверка целостности SQLite и миграции схемы.
+
+## Эксплуатация
+
+- [RUNBOOK.md](RUNBOOK.md)
+- [INCIDENT_PLAYBOOK.md](INCIDENT_PLAYBOOK.md)
+- [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
+- [RELEASE_NOTES.md](RELEASE_NOTES.md)
+
+## Лицензия
+
+В репозитории пока не добавлен отдельный `LICENSE` файл.
