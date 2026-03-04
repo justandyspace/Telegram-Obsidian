@@ -4,12 +4,56 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telegram-obsidian-local"
-version = "0.1.0"
-description = "Phase 1 foundation: Telegram intake bot with idempotent Obsidian pipeline"
+version = "0.2.0"
+description = "Telegram bot for saving content to Obsidian vault with RAG search"
 requires-python = ">=3.12"
 dependencies = [
-  "aiogram==3.26.0"
+  "aiohttp>=3.9.0",
+  "aiogram==3.26.0",
+  "beautifulsoup4==4.12.3",
+  "google-genai==1.65.0",
+  "pypdf==6.7.5",
+  "requests==2.32.4",
+  "youtube-transcript-api==0.6.2"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.4",
+  "mypy>=1.10",
+  "bandit>=1.8",
+  "pip-audit>=2.7",
 ]
 
 [tool.setuptools]
 packages = ["src", "src.bot", "src.pipeline", "src.obsidian", "src.rag", "src.parsers", "src.infra"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_classes = ["*Tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+exclude = ["tests"]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".data", ".venv"]
+skips = ["B101", "B104", "B311"]

@@ -1,1 +1,8 @@
+aiohttp>=3.9.0
+aiohttp>=3.9.0
 aiogram==3.26.0
+beautifulsoup4==4.12.3
+google-genai==1.65.0
+pypdf==6.7.5
+requests==2.32.4
+youtube-transcript-api==0.6.2

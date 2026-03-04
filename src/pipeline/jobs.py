@@ -50,6 +50,7 @@ class JobService:
         )
 
         payload = {
+            "tenant_id": request.tenant_id,
             "content": content,
             "title": title,
             "hashtags": sorted(hashtags),
@@ -67,6 +68,7 @@ class JobService:
         is_new, job_id, status = self._store.enqueue_job(
             idempotency_key=idempotency_key,
             content_fingerprint=content_fingerprint,
+            tenant_id=request.tenant_id,
             user_id=request.user_id,
             chat_id=request.chat_id,
             message_id=request.message_id,

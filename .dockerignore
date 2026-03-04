@@ -1,0 +1,15 @@
+.git
+.gitignore
+.data
+.venv
+.env
+__pycache__
+*.pyc
+*.pyo
+tests
+backups
+scripts
+BOT_ARCHITECTURE_ROADMAP.md
+README.md
+run_local.ps1
+.dockerignore

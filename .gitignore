@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
 # Virtual environments
 .venv/
@@ -17,6 +18,7 @@ venv/
 
 # Runtime data
 .data/
+backups/
 local_obsidian_inbox/
 
 # OS/editor

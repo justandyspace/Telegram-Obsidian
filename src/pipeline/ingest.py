@@ -8,6 +8,7 @@ from datetime import datetime
 
 @dataclass
 class IngestRequest:
+    tenant_id: str
     user_id: int
     chat_id: int
     message_id: int

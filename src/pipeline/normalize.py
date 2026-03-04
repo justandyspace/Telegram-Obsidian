@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-HASHTAG_RE = re.compile(r"(?<!\w)#([A-Za-z0-9_]+)")
+HASHTAG_RE = re.compile(r"(?<!\w)#(\w+)", re.UNICODE)
 WHITESPACE_RE = re.compile(r"\s+")
 
 

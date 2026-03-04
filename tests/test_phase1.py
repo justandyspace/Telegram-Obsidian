@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.infra.storage import StateStore
@@ -13,7 +13,7 @@ from src.obsidian.vault_router import deterministic_file_name
 class Phase1FoundationTests(unittest.TestCase):
     def test_deterministic_filename_format(self) -> None:
         name = deterministic_file_name(
-            created_at=datetime(2026, 3, 4, 21, 15, tzinfo=timezone.utc),
+            created_at=datetime(2026, 3, 4, 21, 15, tzinfo=UTC),
             title="My Test Title",
             note_id="ABCD1234",
         )
@@ -27,9 +27,10 @@ class Phase1FoundationTests(unittest.TestCase):
 
         store = StateStore(tmpdir / "state.sqlite3")
         store.initialize()
-        writer = ObsidianNoteWriter(tmpdir / "vault", store)
+        writer = ObsidianNoteWriter(tmpdir / "vault", store, multi_tenant=False)
 
         payload = {
+            "tenant_id": "tg_999",
             "content": "Initial user text",
             "title": "Sample",
             "hashtags": ["save"],
@@ -38,7 +39,7 @@ class Phase1FoundationTests(unittest.TestCase):
             "source": {
                 "chat_id": 1,
                 "message_id": 10,
-                "message_datetime": datetime.now(timezone.utc).isoformat(),
+                "message_datetime": datetime.now(UTC).isoformat(),
                 "user_id": 999,
             },
         }

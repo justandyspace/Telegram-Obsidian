@@ -1,0 +1,25 @@
+[Unit]
+Description=Telegram to Obsidian Worker
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=user
+Group=user
+WorkingDirectory=/home/user/telegram-obsidian-local
+EnvironmentFile=/home/user/telegram-obsidian-local/.env
+ExecStart=/usr/bin/python3 -m src.main --role worker
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/user/telegram-obsidian-local/.data /home/user/telegram-obsidian-local/local_obsidian_inbox
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+

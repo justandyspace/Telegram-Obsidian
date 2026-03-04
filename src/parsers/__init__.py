@@ -1,1 +1,1 @@
-"""Package marker for parser modules."""
+"""Parser package for content extraction."""

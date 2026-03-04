@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   bot:
     build:
@@ -9,18 +7,32 @@ services:
     env_file:
       - .env
     restart: unless-stopped
-    depends_on:
-      - couchdb
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
     volumes:
       - ./local_obsidian_inbox:/data/vault
       - ./.data/state:/srv/obsidian-bot/state
       - ./.data/cache:/srv/obsidian-bot/cache
       - ./.data/index:/srv/obsidian-bot/index
+    ports:
+      - "8082:8082"
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 8080), timeout=2); s.sendall(b'GET /health HTTP/1.0\\r\\n\\r\\n'); data=s.recv(128); s.close(); raise SystemExit(0 if b'200 OK' in data else 1)"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   worker:
     build:
@@ -30,8 +42,14 @@ services:
     env_file:
       - .env
     restart: unless-stopped
-    depends_on:
-      - couchdb
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
     volumes:
       - ./local_obsidian_inbox:/data/vault
       - ./.data/state:/srv/obsidian-bot/state
@@ -42,6 +60,12 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   couchdb:
     image: couchdb:3.3
@@ -52,7 +76,31 @@ services:
     volumes:
       - couchdb_data:/opt/couchdb/data
     ports:
-      - "5984:5984"
+      - "127.0.0.1:5984:5984"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    profiles:
+      - remote
+    depends_on:
+      - couchdb
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CF_TUNNEL_TOKEN}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   couchdb_data:
