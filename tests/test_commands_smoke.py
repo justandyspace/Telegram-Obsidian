@@ -30,6 +30,12 @@ class CommandsSmokeTests(unittest.TestCase):
         self.assertEqual(_status_label("done"), "Готово")
         self.assertEqual(_status_label("failed"), "Ошибка")
 
+    def test_status_contains_monitoring_fields(self) -> None:
+        source = inspect.getsource(commands_module.build_command_router)
+        self.assertIn("🩺 <b>Мониторинг процесса</b>", source)
+        self.assertIn("Аптайм", source)
+        self.assertIn("Последняя ошибка", source)
+
 
 class StorageMethodSurfaceTests(unittest.TestCase):
     def setUp(self) -> None:

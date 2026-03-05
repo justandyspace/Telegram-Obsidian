@@ -2,6 +2,7 @@
 Description=Telegram to Obsidian Worker
 After=network.target
 Wants=network-online.target
+OnFailure=telegram-obsidian-alert@%n.service
 
 [Service]
 Type=simple
@@ -12,6 +13,8 @@ EnvironmentFile=/home/user/telegram-obsidian-local/.env
 ExecStart=/usr/bin/python3 -m src.main --role worker
 Restart=always
 RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=10
 TimeoutStopSec=20
 NoNewPrivileges=true
 PrivateTmp=true

@@ -10,12 +10,15 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from src.bot.auth import build_tenant_context, is_authorized_user
+from src.infra.logging import get_logger
+from src.infra.runtime_state import last_error, started_at_iso, uptime_human
 from src.infra.storage import StateStore
 from src.obsidian.search import find_notes, latest_notes
 from src.rag.retriever import RagManager
 
 DELETE_ALL_CONFIRM_TTL_SECONDS = 120
 CARD_DIVIDER = "────────────"
+LOGGER = get_logger(__name__)
 
 
 def build_command_router(
@@ -43,6 +46,16 @@ def build_command_router(
         chat_id = message.chat.id if message.chat else user_id
         return user_id, chat_id
 
+    def _log_command(message: Message, command_name: str) -> None:
+        user_id = message.from_user.id if message.from_user else None
+        chat_id = message.chat.id if message.chat else None
+        LOGGER.info(
+            "Incoming command=%s user_id=%s chat_id=%s",
+            command_name,
+            user_id,
+            chat_id,
+        )
+
     def _delete_all_notes(tenant_id: str) -> tuple[int, int, int]:
         rag = rag_manager.for_tenant(tenant_id)
         tracked_notes = store.list_notes(tenant_id=tenant_id)
@@ -69,6 +82,7 @@ def build_command_router(
 
     @router.message(Command("start"))
     async def start_handler(message: Message) -> None:
+        _log_command(message, "/start")
         if not _authorized(message):
             await message.answer("❌ <i>В доступе отказано:</i> ваш ID не в белом списке.", parse_mode="HTML")
             return
@@ -97,6 +111,7 @@ def build_command_router(
 
     @router.message(Command("status"))
     async def status_handler(message: Message) -> None:
+        _log_command(message, "/status")
         if not _authorized(message):
             await message.answer("Access denied: this Telegram user is not in allowlist.")
             return
@@ -116,6 +131,16 @@ def build_command_router(
         lines.append("📁 <b>База знаний</b>")
         lines.append(f"• RAG индекс: <b>{rag_stats['documents']}</b> док. / <b>{rag_stats['chunks']}</b> фрагм.")
         lines.append(f"• Хранилище: {db_status}")
+        lines.append("")
+        lines.append("🩺 <b>Мониторинг процесса</b>")
+        lines.append(f"• Аптайм: <code>{uptime_human()}</code>")
+        lines.append(f"• Запущен: <code>{html.escape(started_at_iso())}</code>")
+        err_text, err_at = last_error()
+        if err_text:
+            lines.append(f"• Последняя ошибка: <code>{html.escape(err_text[:100])}</code>")
+            lines.append(f"• Время ошибки: <code>{html.escape(err_at)}</code>")
+        else:
+            lines.append("• Последняя ошибка: <b>нет</b>")
         lines.append("")
 
         # Последние файлы
@@ -154,6 +179,7 @@ def build_command_router(
 
     @router.message(Command("find"))
     async def find_handler(message: Message) -> None:
+        _log_command(message, "/find")
         if not _authorized(message):
             return
 
@@ -212,6 +238,7 @@ def build_command_router(
 
     @router.message(Command("summary"))
     async def summary_handler(message: Message) -> None:
+        _log_command(message, "/summary")
         if not _authorized(message):
             return
 
@@ -259,6 +286,7 @@ def build_command_router(
 
     @router.message(Command("retry"))
     async def retry_handler(message: Message) -> None:
+        _log_command(message, "/retry")
         if not _authorized(message):
             return
 
@@ -288,6 +316,7 @@ def build_command_router(
 
     @router.message(Command("job"))
     async def job_handler(message: Message) -> None:
+        _log_command(message, "/job")
         if not _authorized(message):
             return
 
@@ -330,6 +359,7 @@ def build_command_router(
 
     @router.message(Command("delete"))
     async def delete_handler(message: Message) -> None:
+        _log_command(message, "/delete")
         if not _authorized(message):
             return
 

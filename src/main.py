@@ -14,6 +14,7 @@ from src.bot.telegram_router import build_router
 from src.config import AppConfig, load_config
 from src.infra.health import HealthServer
 from src.infra.logging import configure_logging, get_logger
+from src.infra.runtime_state import record_error
 from src.infra.storage import StateStore
 from src.pipeline.ai_service import AIService
 from src.pipeline.jobs import JobService
@@ -61,6 +62,7 @@ async def _run_polling_forever(
             backoff = 1
         except Exception as exc:  # noqa: BLE001
             set_ready(False)
+            record_error(f"polling crash: {exc}")
             LOGGER.exception("Polling crashed, retrying in %s sec: %s", backoff, exc)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
@@ -113,6 +115,7 @@ async def _run_webhook_forever(
             await asyncio.Event().wait()
         except Exception as exc:  # noqa: BLE001
             set_ready(False)
+            record_error(f"webhook crash: {exc}")
             if not retry_forever:
                 raise
             LOGGER.exception("Webhook crashed, retrying in %s sec: %s", backoff, exc)
@@ -188,14 +191,22 @@ async def _run_worker_loop(config: AppConfig, store: StateStore, rag_manager: Ra
     await health.start()
     LOGGER.info("Worker health server listening on %s", config.worker_health_port)
     try:
-        await run_worker(config, store, rag_manager)
+        try:
+            await run_worker(config, store, rag_manager)
+        except Exception as exc:  # noqa: BLE001
+            record_error(f"worker crash: {exc}")
+            raise
     finally:
         ready = False
         await health.stop()
 
 
 async def _run_watcher_loop(config: AppConfig, rag_manager: RagManager) -> None:
-    await run_watcher(config, rag_manager)
+    try:
+        await run_watcher(config, rag_manager)
+    except Exception as exc:  # noqa: BLE001
+        record_error(f"watcher crash: {exc}")
+        raise
 
 
 async def _async_main(role_override: str | None) -> None:

@@ -12,6 +12,8 @@
    - `TELEGRAM_TOKEN`
    - `TELEGRAM_ALLOWED_USER_ID` or `TELEGRAM_ALLOWED_USER_IDS`
    - `WEBHOOK_SECRET_TOKEN` (if webhook enabled)
+   - `ALERT_WEBHOOK_URL` (recommended for crash alerts)
+   - No placeholder secrets (`change_me`, `put_*`, `replace_*`)
 3. Quality gates pass:
    ```bash
    pip install -r requirements-dev.txt
@@ -51,6 +53,9 @@ docker compose logs --tail=100 bot worker
    - job moves to `done`
    - note created in tenant vault
    - RAG search returns the note
+4. Confirm crash alert wiring:
+   - `systemctl cat telegram-obsidian-bot | grep OnFailure`
+   - `systemctl cat telegram-obsidian-worker | grep OnFailure`
 
 ## Rollback trigger conditions
 

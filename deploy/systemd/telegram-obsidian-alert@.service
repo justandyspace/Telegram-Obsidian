@@ -1,0 +1,14 @@
+[Unit]
+Description=Alert on failed unit %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=user
+Group=user
+EnvironmentFile=/home/user/telegram-obsidian-local/.env
+ExecStart=/bin/bash /home/user/telegram-obsidian-local/deploy/systemd/telegram-obsidian-alert.sh %i
+
+[Install]
+WantedBy=multi-user.target
