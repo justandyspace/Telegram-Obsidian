@@ -1,9 +1,0 @@
-First name: <your first name>
-Last name: <your last name>
-Address line 1: <street and number>
-Address line 2: <optional>
-City: <city>
-State/province: <state>
-Country: <country>
-Zip/postal code: <zip>
-Account Type: <Personal|Business>
