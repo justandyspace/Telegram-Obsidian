@@ -86,6 +86,8 @@ async def main() -> int:
     bot_username = _detect_bot_username()
     timeout_seconds = int((os.getenv("TG_TIMEOUT_SECONDS") or "25").strip())
     commands = _commands_from_env()
+    login_code = (os.getenv("TG_LOGIN_CODE") or "").strip()
+    twofa_password = (os.getenv("TG_2FA_PASSWORD") or "").strip()
 
     session_path = Path(
         (os.getenv("TG_SESSION") or str(Path.home() / ".telegram-smoke" / "session")).strip()
@@ -103,7 +105,14 @@ async def main() -> int:
     print()
 
     client = TelegramClient(str(session_path), api_id, api_hash)
-    await client.start(phone=phone)
+    if login_code:
+        await client.start(
+            phone=phone,
+            code_callback=lambda: login_code,
+            password=twofa_password or None,
+        )
+    else:
+        await client.start(phone=phone)
 
     me = await client.get_me()
     display = (me.username or f"id={me.id}") if me else "unknown"
