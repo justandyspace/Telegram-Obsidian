@@ -158,5 +158,5 @@ def load_config() -> AppConfig:
         worker_health_port=int(os.getenv("WORKER_HEALTH_PORT", "8081")),
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         gemini_embed_model=os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001").strip(),
-        gemini_generation_model=os.getenv("GEMINI_GENERATION_MODEL", "gemini-2.5-flash").strip(),
+        gemini_generation_model=os.getenv("GEMINI_GENERATION_MODEL", "gemini-2.0-flash-lite").strip(),
     )

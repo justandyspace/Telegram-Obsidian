@@ -5,8 +5,15 @@ from __future__ import annotations
 import random
 import threading
 import time
-from collections.abc import Callable
+import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+import asyncio
+from typing import Any, TypeVar
+
+T = TypeVar("T")
+
+LOGGER = logging.getLogger(__name__)
 
 
 class CircuitBreakerOpenError(RuntimeError):
@@ -28,6 +35,35 @@ class RetryPolicy:
         base = min(self.base_delay_seconds * (2 ** (attempt - 1)), self.max_delay_seconds)
         jitter = base * self.jitter_ratio
         return float(max(0.0, base + random.uniform(-jitter, jitter)))
+
+
+def with_retry(policy: RetryPolicy, operation: Callable[[], T], exc_types: tuple[type[Exception], ...] = (Exception,)) -> T:
+    """Executes an operation with synchronous exponential backoff retries."""
+    attempts = policy.clamp_attempts()
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except exc_types as exc:
+            if attempt == attempts:
+                raise
+            delay = policy.backoff_delay(attempt)
+            LOGGER.warning("Operation failed (attempt %d/%d): %s. Retrying in %.2fs...", attempt, attempts, exc, delay)
+            time.sleep(delay)
+    raise RuntimeError("Unreachable")
+
+async def async_with_retry(policy: RetryPolicy, operation: Callable[[], Awaitable[T]], exc_types: tuple[type[Exception], ...] = (Exception,)) -> T:
+    """Executes an async operation with asynchronous exponential backoff retries."""
+    attempts = policy.clamp_attempts()
+    for attempt in range(1, attempts + 1):
+        try:
+            return await operation()
+        except exc_types as exc:
+            if attempt == attempts:
+                raise
+            delay = policy.backoff_delay(attempt)
+            LOGGER.warning("Async operation failed (attempt %d/%d): %s. Retrying in %.2fs...", attempt, attempts, exc, delay)
+            await asyncio.sleep(delay)
+    raise RuntimeError("Unreachable")
 
 
 @dataclass

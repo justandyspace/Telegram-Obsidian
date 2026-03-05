@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types
 
 from src.infra.logging import get_logger
+from src.infra.resilience import RetryPolicy, with_retry
 
 LOGGER = get_logger(__name__)
 
@@ -57,14 +58,20 @@ def enrich_payload_with_ai(
 
     try:
         gemini_client = client or genai.Client(api_key=api_key)
-        response = gemini_client.models.generate_content(
-            model=model_name,
-            contents=f"{prompt}\n\nТекст:\n{base_text}",
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.2,
-            ),
-        )
+        
+        def _call_gemini() -> Any:
+            return gemini_client.models.generate_content(
+                model=model_name,
+                contents=f"{prompt}\n\nТекст:\n{base_text}",
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                ),
+            )
+            
+        policy = RetryPolicy(max_attempts=4, base_delay_seconds=2.0, max_delay_seconds=15.0)
+        response = with_retry(policy, _call_gemini, exc_types=(Exception,))
+        
         ai_tags, ai_summary, translation = _parse_ai_response(response.text)
         merged["auto_tags"] = _merge_tags(existing_tags, ai_tags)
         if ai_summary:

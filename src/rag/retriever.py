@@ -9,6 +9,7 @@ from pathlib import Path
 from google import genai
 
 from src.infra.logging import get_logger
+from src.infra.resilience import RetryPolicy, with_retry
 from src.infra.tenancy import tenant_index_dir, tenant_vault_path
 from src.rag.chunker import chunk_text
 from src.rag.embedder import BaseEmbedder, build_embedder
@@ -32,7 +33,7 @@ class RagService:
         *,
         gemini_api_key: str = "",
         gemini_embed_model: str = "gemini-embedding-001",
-        gemini_generation_model: str = "gemini-2.5-flash",
+        gemini_generation_model: str = "gemini-2.0-flash-lite",
     ) -> None:
         self.vault_path = vault_path
         self._embedder: BaseEmbedder = build_embedder(
@@ -137,10 +138,16 @@ class RagService:
                 "Context:\n"
                 + "\n\n".join(context_lines)
             )
-            result = self._generation_client.models.generate_content(
-                model=self._generation_model,
-                contents=prompt,
-            )
+            
+            def _call_gemini() -> Any:
+                return self._generation_client.models.generate_content(
+                    model=self._generation_model,
+                    contents=prompt,
+                )
+            
+            policy = RetryPolicy(max_attempts=3, base_delay_seconds=1.5, max_delay_seconds=10.0)
+            result = with_retry(policy, _call_gemini, exc_types=(Exception,))
+            
             text = (result.text or "").strip()
             return text[:2500]
         except Exception as exc:  # noqa: BLE001

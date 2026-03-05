@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from google import genai
 from google.genai import types
 from src.infra.logging import get_logger
+from src.infra.resilience import RetryPolicy, async_with_retry
 
 LOGGER = get_logger(__name__)
 
@@ -38,13 +40,19 @@ class AIService:
 
         try:
             prompt = f"Пользователь прислал: {user_text}\n\nКонтекст обработки: {context_info}"
-            response = await self.client.aio.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.system_instruction,
+            
+            async def _call_gemini() -> Any:
+                return await self.client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=self.system_instruction,
+                    )
                 )
-            )
+                
+            policy = RetryPolicy(max_attempts=3, base_delay_seconds=1.5, max_delay_seconds=10.0)
+            response = await async_with_retry(policy, _call_gemini, exc_types=(Exception,))
+            
             return response.text.strip()
         except Exception as exc:
             LOGGER.exception("Failed to generate AI reply")

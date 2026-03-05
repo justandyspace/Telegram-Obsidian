@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from google import genai
 from google.genai import types
 
+from src.infra.resilience import RetryPolicy, with_retry
 from src.parsers.models import ParseResult
 from src.parsers.url_safety import safe_http_get
 from src.pipeline.normalize import normalize_text
@@ -60,17 +61,29 @@ def parse_voice(source: str, timeout_seconds: int = 40) -> ParseResult:
     try:
         local_path = _resolve_local_audio_path(source, timeout_seconds=timeout_seconds)
         mime_type = _guess_mime_type(local_path)
-        uploaded = client.files.upload(
-            file=local_path,
-            config=types.UploadFileConfig(mime_type=mime_type),
-        )
+        
+        policy = RetryPolicy(max_attempts=4, base_delay_seconds=2.0, max_delay_seconds=15.0)
+        
+        def _call_upload() -> Any:
+            return client.files.upload(
+                file=local_path,
+                config=types.UploadFileConfig(mime_type=mime_type),
+            )
+            
+        uploaded = with_retry(policy, _call_upload, exc_types=(Exception,))
         uploaded_name = uploaded.name or ""
         uploaded_uri = uploaded.uri or ""
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[uploaded, _TRANSCRIBE_PROMPT],
-        )
+        model_name = os.getenv("GEMINI_GENERATION_MODEL", "gemini-2.0-flash-lite").strip()
+        
+        def _call_generate() -> Any:
+            return client.models.generate_content(
+                model=model_name,
+                contents=[uploaded, _TRANSCRIBE_PROMPT],
+            )
+            
+        response = with_retry(policy, _call_generate, exc_types=(Exception,))
+        
         transcript = normalize_text(str(response.text or ""))[:12000]
         status = "ok" if transcript else "fallback"
         text = transcript or "Audio processed, but transcript is empty."
