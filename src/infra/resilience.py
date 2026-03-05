@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import random
 import threading
 import time
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-import asyncio
-from typing import Any, TypeVar
-
-T = TypeVar("T")
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +34,7 @@ class RetryPolicy:
         return float(max(0.0, base + random.uniform(-jitter, jitter)))
 
 
-def with_retry(policy: RetryPolicy, operation: Callable[[], T], exc_types: tuple[type[Exception], ...] = (Exception,)) -> T:
+def with_retry[T](policy: RetryPolicy, operation: Callable[[], T], exc_types: tuple[type[Exception], ...] = (Exception,)) -> T:
     """Executes an operation with synchronous exponential backoff retries."""
     attempts = policy.clamp_attempts()
     for attempt in range(1, attempts + 1):
@@ -51,7 +48,8 @@ def with_retry(policy: RetryPolicy, operation: Callable[[], T], exc_types: tuple
             time.sleep(delay)
     raise RuntimeError("Unreachable")
 
-async def async_with_retry(policy: RetryPolicy, operation: Callable[[], Awaitable[T]], exc_types: tuple[type[Exception], ...] = (Exception,)) -> T:
+
+async def async_with_retry[T](policy: RetryPolicy, operation: Callable[[], Awaitable[T]], exc_types: tuple[type[Exception], ...] = (Exception,)) -> T:
     """Executes an async operation with asynchronous exponential backoff retries."""
     attempts = policy.clamp_attempts()
     for attempt in range(1, attempts + 1):

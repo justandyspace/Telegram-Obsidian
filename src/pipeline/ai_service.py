@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
+
 from google import genai
 from google.genai import types
+
 from src.infra.logging import get_logger
 from src.infra.resilience import RetryPolicy, async_with_retry
 
