@@ -156,7 +156,7 @@ CI: `.github/workflows/ci.yml`
 python scripts/weekly_healthcheck.py `
   --state-db .data/state/bot_state.sqlite3 `
   --vault-dir local_obsidian_inbox `
-  --obsidian-dir "C:\Users\Desktop\Documents\Obsidian Vault\.obsidian"
+  --obsidian-dir "C:\path\to\your\Obsidian Vault\.obsidian"
 ```
 
 ## Troubleshooting: заметка не появилась в Obsidian

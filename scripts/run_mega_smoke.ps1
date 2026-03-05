@@ -1,5 +1,5 @@
 param(
-    [string]$PythonExe = "C:\Users\Desktop\AppData\Local\Programs\Python\Python312\python.exe",
+    [string]$PythonExe = "python",
     [string]$ApiId = "",
     [string]$ApiHash = "",
     [string]$BotUsername = "",
