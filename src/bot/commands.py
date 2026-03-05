@@ -15,6 +15,7 @@ from src.obsidian.search import find_notes, latest_notes
 from src.rag.retriever import RagManager
 
 DELETE_ALL_CONFIRM_TTL_SECONDS = 120
+CARD_DIVIDER = "────────────"
 
 
 def build_command_router(
@@ -61,25 +62,36 @@ def build_command_router(
         db_deleted = store.delete_all_note_records(tenant_id=tenant_id)
         return file_deleted, index_deleted, db_deleted
 
+    def _card(title: str, lines: list[str]) -> str:
+        body = [f"<b>{html.escape(title)}</b>", CARD_DIVIDER]
+        body.extend(lines)
+        return "\n".join(body)
+
     @router.message(Command("start"))
     async def start_handler(message: Message) -> None:
         if not _authorized(message):
             await message.answer("❌ <i>В доступе отказано:</i> ваш ID не в белом списке.", parse_mode="HTML")
             return
         await message.answer(
-            "👋 <b>Привет! Я твой AI-ассистент для Obsidian.</b>\n\n"
-            "Отправь мне текст, мысль или ссылку, и я сохраню это в твою базу знаний.\n"
-            "Поддерживаемые теги: <code>#save</code>, <code>#summary</code>, <code>#task</code>, <code>#translate</code>\n\n"
-            "🛠 <b>Доступные команды:</b>\n"
-            "• /status — 📊 Статус системы и базы\n"
-            "• <code>/find &lt;запрос&gt;</code> — 🔍 Поиск по заметкам\n"
-            "• <code>/summary &lt;вопрос&gt;</code> — 🧠 Задать вопрос по базе (RAG)\n"
-            "• <code>/retry &lt;job_id&gt;</code> — ♻️ Перезапустить упавшую задачу\n"
-            "• <code>/job &lt;job_id | prefix&gt;</code> — 🧾 Статус конкретной задачи\n"
-            "• <code>/delete &lt;ID|файл&gt;</code> — 🗑 Удалить заметку\n"
-            "• <code>/delete all</code> — 🧹 Запросить удаление всех заметок tenant\n"
-            "• <code>/delete confirm &lt;token&gt;</code> — ✅ Подтвердить массовое удаление\n"
-            "• <code>/delete cancel</code> — ↩️ Отменить массовое удаление",
+            "🤖 <b>Привет. Я готов помогать с твоим Obsidian.</b>\n"
+            f"{CARD_DIVIDER}\n"
+            "Отправляй текст, мысли, ссылки и голосовые, а я аккуратно сохраню их в базу.\n\n"
+            "🏷 <b>Поддерживаемые теги:</b>\n"
+            "• <code>#save</code>\n"
+            "• <code>#summary</code>\n"
+            "• <code>#task</code>\n"
+            "• <code>#translate</code>\n\n"
+            "🧭 <b>Команды:</b>\n"
+            "• <code>/status</code> — общая сводка по системе\n"
+            "• <code>/find &lt;запрос&gt;</code> — поиск по заметкам\n"
+            "• <code>/summary &lt;вопрос&gt;</code> — ответ по базе (RAG)\n"
+            "• <code>/job &lt;job_id | prefix&gt;</code> — статус конкретной задачи\n"
+            "• <code>/retry &lt;job_id&gt;</code> — перезапуск упавшей задачи\n"
+            "• <code>/delete &lt;ID|файл&gt;</code> — удалить заметку\n"
+            "• <code>/delete all</code> — запросить массовое удаление\n"
+            "• <code>/delete confirm &lt;token&gt;</code> — подтвердить удаление\n"
+            "• <code>/delete cancel</code> — отменить удаление\n\n"
+            "✅ <b>Можешь просто отправить сообщение, остальное беру на себя.</b>",
             parse_mode="HTML"
         )
 
@@ -96,21 +108,21 @@ def build_command_router(
         rag = rag_manager.for_tenant(tenant_id)
         integrity_ok, integrity_details = store.integrity_check()
 
-        lines = ["📊 <b>Статус системы</b>", ""]
+        lines = ["🤖 <b>Проверил текущее состояние.</b>", "Ниже краткая сводка по системе.", "", "📊 <b>Статус системы</b>", CARD_DIVIDER]
         
         # Индекс и хранилище
         rag_stats = rag.stats()
         db_status = "✅ OK" if integrity_ok else f"❌ Ошибка ({html.escape(integrity_details)})"
-        lines.append("📁 <b>База знаний (Obsidian)</b>")
-        lines.append(f"• Индекс RAG: {rag_stats['documents']} док. / {rag_stats['chunks']} фрагм.")
-        lines.append(f"• БД: {db_status}")
+        lines.append("📁 <b>База знаний</b>")
+        lines.append(f"• RAG индекс: <b>{rag_stats['documents']}</b> док. / <b>{rag_stats['chunks']}</b> фрагм.")
+        lines.append(f"• Хранилище: {db_status}")
         lines.append("")
 
         # Последние файлы
         recent_done_paths = [item.get("note_path", "") for item in recent if item.get("status") == "done"]
         recent_done_paths = [path for path in recent_done_paths if path]
         if recent_done_paths:
-            lines.append("📝 <b>Недавние заметки:</b>")
+            lines.append("📝 <b>Недавние заметки</b>")
             for path in recent_done_paths[:3]:
                 # Показываем только имя файла, чтобы не мусорить длинными путями
                 file_name = html.escape(Path(path).name)
@@ -118,21 +130,25 @@ def build_command_router(
             lines.append("")
 
         # Очередь задач
-        lines.append("⚙️ <b>Очередь обработки:</b>")
+        lines.append("⚙️ <b>Очередь</b>")
         if counts:
-            for key, value in sorted(counts.items()):
-                emoji = "✅" if key == "done" else "⏳" if key in ("new", "processing") else "⚠️"
-                lines.append(f"{emoji} {html.escape(key.capitalize())}: {value}")
+            for key, value in sorted(counts.items(), key=lambda item: item[0]):
+                emoji = _job_status_emoji(_normalize_job_status(key))
+                label = _status_label(key)
+                lines.append(f"• {emoji} {label}: <b>{value}</b>")
         else:
             lines.append("• Очередь пуста")
 
         # Ошибки
         if failures:
             lines.append("")
-            lines.append("❌ <b>Последние ошибки:</b>")
+            lines.append("❌ <b>Последние ошибки</b>")
             for item in failures:
                 error_text = html.escape((item.get("error") or "no error text").replace("\n", " ")[:100])
-                lines.append(f"• ID: <code>{html.escape(_short_job(item['job_id']))}</code> ➔ {error_text}...")
+                lines.append(f"• <code>{html.escape(_short_job(item['job_id']))}</code>: {error_text}...")
+        else:
+            lines.append("")
+            lines.append("✅ <b>Ошибок в последних задачах не вижу.</b>")
 
         await message.answer("\n".join(lines), parse_mode="HTML")
 
@@ -152,7 +168,14 @@ def build_command_router(
         safe_query = html.escape(query)
         
         if hits:
-            lines = [f"🔍 <b>Поиск:</b> <code>{safe_query}</code>", "", "✨ <b>Семантические совпадения:</b>", ""]
+            lines = [
+                f"🤖 <b>Нашёл релевантные фрагменты по запросу</b> <code>{safe_query}</code>.",
+                "",
+                f"🔍 <b>Поиск</b>: <code>{safe_query}</code>",
+                CARD_DIVIDER,
+                "✨ <b>Семантические совпадения</b>",
+                "",
+            ]
             for idx, hit in enumerate(hits, start=1):
                 snippet = html.escape(" ".join(hit.chunk_text.split())[:200])
                 safe_file = html.escape(hit.file_name)
@@ -164,10 +187,21 @@ def build_command_router(
 
         matches = find_notes(rag.vault_path, query, limit=5)
         if not matches:
-            await message.answer(f"🤷‍♂️ По запросу <code>{safe_query}</code> ничего не найдено.", parse_mode="HTML")
+            await message.answer(
+                "🤖 <b>Проверил базу, но точных совпадений пока нет.</b>\n"
+                f"Попробуй переформулировать запрос: <code>{safe_query}</code>",
+                parse_mode="HTML",
+            )
             return
 
-        lines = [f"🔍 <b>Поиск:</b> <code>{safe_query}</code>", "", "📌 <b>Текстовые совпадения:</b>", ""]
+        lines = [
+            f"🤖 <b>Семантических совпадений не нашлось, но есть текстовые результаты для</b> <code>{safe_query}</code>.",
+            "",
+            f"🔍 <b>Поиск</b>: <code>{safe_query}</code>",
+            CARD_DIVIDER,
+            "📌 <b>Текстовые совпадения</b>",
+            "",
+        ]
         for idx, item in enumerate(matches, start=1):
             safe_file = html.escape(item['file_name'])
             safe_snippet = html.escape(item['snippet'])
@@ -188,10 +222,22 @@ def build_command_router(
             answer = rag.answer(query, top_k=4)
             safe_query = html.escape(query)
             if not answer.sources:
-                await message.answer(f"🤷‍♂️ Для ответа на <code>{safe_query}</code> в базе не нашлось подходящих данных.", parse_mode="HTML")
+                await message.answer(
+                    "🤖 <b>Пока не могу ответить уверенно на этот вопрос.</b>\n"
+                    f"В базе не хватает контекста для: <code>{safe_query}</code>",
+                    parse_mode="HTML",
+                )
                 return
             safe_answer = html.escape(answer.answer)
-            lines = [f"🧠 <b>Вопрос:</b> <code>{safe_query}</code>", "", f"{safe_answer}", "", "📚 <b>На основе заметок:</b>"]
+            lines = [
+                "🤖 <b>Вот что получилось по твоему вопросу:</b>",
+                "",
+                f"🧠 <b>Вопрос</b>: <code>{safe_query}</code>",
+                CARD_DIVIDER,
+                f"{safe_answer}",
+                "",
+                "📚 <b>На основе заметок</b>",
+            ]
             for src in answer.sources:
                 safe_file = html.escape(src.file_name)
                 lines.append(f"• <code>{safe_file}</code> <i>(схожесть: {src.score:.2f})</i>")
@@ -202,7 +248,7 @@ def build_command_router(
         if not latest:
             await message.answer("📭 База знаний пока пуста.", parse_mode="HTML")
             return
-        lines = ["📋 <b>Последние записи:</b>", ""]
+        lines = ["🤖 <b>Сейчас покажу последние записи из базы.</b>", "", "📋 <b>Последние записи</b>", CARD_DIVIDER]
         for idx, item in enumerate(latest, start=1):
             safe_file = html.escape(item['file_name'])
             safe_snippet = html.escape(item['snippet'])
@@ -225,9 +271,20 @@ def build_command_router(
         ok, details = store.retry_job(job_ref, tenant_id=tenant_id)
         safe_details = html.escape(str(details))
         if ok:
-            await message.answer(f"♻️ <b>Успешно:</b> задача <code>{_short_job(safe_details)}</code> возвращена в очередь.", parse_mode="HTML")
+            await message.answer(
+                _card(
+                    "♻️ Повторный запуск принят",
+                    [
+                        "Задача принята в повторную обработку.",
+                        "",
+                        f"• Задача: <code>{_short_job(safe_details)}</code>",
+                        "• Статус: возвращена в <code>retry</code>",
+                    ],
+                ),
+                parse_mode="HTML",
+            )
         else:
-            await message.answer(f"❌ <b>Ошибка:</b> {safe_details}", parse_mode="HTML")
+            await message.answer(_card("❌ Не удалось перезапустить", [safe_details]), parse_mode="HTML")
 
     @router.message(Command("job"))
     async def job_handler(message: Message) -> None:
@@ -255,8 +312,10 @@ def build_command_router(
         safe_updated = html.escape(str(resolved.get("updated_at") or "unknown"))
 
         lines = [
-            "🧾 <b>Статус задачи</b>",
+            "🤖 <b>Проверил задачу. Вот её актуальный статус:</b>",
             "",
+            "🧾 <b>Статус задачи</b>",
+            CARD_DIVIDER,
             f"• <b>ID:</b> <code>{safe_job_id}</code>",
             f"• <b>Статус:</b> {status_emoji} <code>{html.escape(status)}</code>",
             f"• <b>Обновлено:</b> <code>{safe_updated}</code>",
@@ -265,7 +324,7 @@ def build_command_router(
         note_path = str(resolved.get("note_path") or "")
         if status == "done" and note_path:
             safe_note = html.escape(Path(note_path).name)
-            lines.append(f"• <b>Заметка:</b> <code>{safe_note}</code>")
+            lines.append(f"• <b>Файл:</b> <code>{safe_note}</code>")
 
         await message.answer("\n".join(lines), parse_mode="HTML")
 
@@ -312,9 +371,9 @@ def build_command_router(
             user_id, _ = _actor_ids(message)
             canceled = store.cancel_delete_all_confirmation(tenant_id=tenant_id, user_id=user_id)
             if canceled:
-                await message.answer("✅ Ожидающее массовое удаление отменено.", parse_mode="HTML")
+                await message.answer(_card("✅ Массовое удаление отменено", ["Ожидающее подтверждение удалено."]), parse_mode="HTML")
             else:
-                await message.answer("ℹ️ Нет активного подтверждения для массового удаления.", parse_mode="HTML")
+                await message.answer(_card("ℹ️ Нечего отменять", ["Нет активного подтверждения на /delete all."]), parse_mode="HTML")
             return
 
         if lowered == "confirm" or lowered.startswith("confirm "):
@@ -347,10 +406,12 @@ def build_command_router(
 
             file_deleted, index_deleted, db_deleted = _delete_all_notes(tenant_id)
             await message.answer(
-                "🗑 <b>Массовое удаление завершено</b>\n\n"
-                f"• <b>Файлов удалено:</b> {file_deleted}\n"
-                f"• <b>Документов удалено из RAG:</b> {index_deleted}\n"
-                f"• <b>Записей удалено из БД:</b> {db_deleted}",
+                "🗑 <b>Массовое удаление завершено</b>\n"
+                f"{CARD_DIVIDER}\n"
+                "Готово, очистка выполнена.\n\n"
+                f"• Файлов удалено: <b>{file_deleted}</b>\n"
+                f"• Документов удалено из RAG: <b>{index_deleted}</b>\n"
+                f"• Записей удалено из БД: <b>{db_deleted}</b>",
                 parse_mode="HTML",
             )
             return
@@ -388,10 +449,12 @@ def build_command_router(
         file_status = "да" if file_deleted else "уже отсутствовал"
         safe_file = html.escape(str(note['file_name']))
         await message.answer(
-            f"🗑 <b>Заметка удалена!</b>\n\n"
-            f"• <b>Файл:</b> <code>{safe_file}</code>\n"
-            f"• <b>Файл физически стерт:</b> {file_status}\n"
-            f"• <b>Индекс RAG:</b> очищен",
+            f"🗑 <b>Заметка удалена</b>\n"
+            f"{CARD_DIVIDER}\n"
+            "Сделано, запись удалена из хранилища и индекса.\n\n"
+            f"• Файл: <code>{safe_file}</code>\n"
+            f"• Файл физически стерт: {file_status}\n"
+            f"• Индекс RAG: очищен",
             parse_mode="HTML"
         )
 
@@ -435,3 +498,15 @@ def _is_within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _status_label(status: str) -> str:
+    normalized = _normalize_job_status(status)
+    labels = {
+        "queued": "В очереди",
+        "processing": "В обработке",
+        "retry": "Повтор",
+        "done": "Готово",
+        "failed": "Ошибка",
+    }
+    return labels.get(normalized, normalized.capitalize() or "Unknown")

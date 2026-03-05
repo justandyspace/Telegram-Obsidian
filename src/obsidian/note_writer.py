@@ -27,10 +27,10 @@ class ObsidianNoteWriter:
         cdb_user = os.getenv("COUCHDB_USER")
         cdb_pass = os.getenv("COUCHDB_PASSWORD")
         cdb_db = os.getenv("COUCHDB_DATABASE", "obsidian")
+        cdb_url = os.getenv("COUCHDB_URL", "http://couchdb:5984")
         if cdb_user and cdb_pass:
-            # We use the internal service name 'couchdb' as defined in docker-compose
             self._couchdb = CouchDBBridge(
-                url="http://couchdb:5984",
+                url=cdb_url,
                 user=cdb_user,
                 password=cdb_pass,
                 db_name=cdb_db

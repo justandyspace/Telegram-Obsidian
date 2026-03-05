@@ -15,6 +15,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
+    depends_on:
+      - couchdb
     volumes:
       - ./local_obsidian_inbox:/data/vault
       - ./.data/state:/srv/obsidian-bot/state
@@ -50,6 +52,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
+    depends_on:
+      - couchdb
     volumes:
       - ./local_obsidian_inbox:/data/vault
       - ./.data/state:/srv/obsidian-bot/state
@@ -75,6 +79,7 @@ services:
       COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
     volumes:
       - couchdb_data:/opt/couchdb/data
+      - ./deploy/couchdb/local.ini:/opt/couchdb/etc/local.d/obsidian.ini:ro
     ports:
       - "127.0.0.1:5984:5984"
     logging:
