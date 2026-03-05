@@ -14,3 +14,4 @@ class IngestRequest:
     message_id: int
     message_datetime: datetime
     raw_text: str
+    forward_source: str | None = None

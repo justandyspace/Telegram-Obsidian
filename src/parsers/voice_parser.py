@@ -16,10 +16,16 @@ from src.parsers.url_safety import safe_http_get
 from src.pipeline.normalize import normalize_text
 
 _AUDIO_EXT_TO_MIME = {
+    ".3gp": "video/3gpp",
     ".aac": "audio/aac",
     ".flac": "audio/flac",
     ".m4a": "audio/mp4",
+    ".m4v": "video/x-m4v",
+    ".mov": "video/quicktime",
     ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".mpeg": "video/mpeg",
+    ".mpg": "video/mpeg",
     ".oga": "audio/ogg",
     ".ogg": "audio/ogg",
     ".wav": "audio/wav",
@@ -140,7 +146,7 @@ def _guess_mime_type(path: str) -> str:
     if suffix in _AUDIO_EXT_TO_MIME:
         return _AUDIO_EXT_TO_MIME[suffix]
     guessed, _ = mimetypes.guess_type(path)
-    if guessed and guessed.startswith("audio/"):
+    if guessed and (guessed.startswith("audio/") or guessed.startswith("video/")):
         return guessed
     return "audio/mpeg"
 

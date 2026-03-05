@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from src.parsers.article_parser import parse_article
 from src.parsers.models import ParseResult
@@ -14,7 +14,23 @@ from src.parsers.voice_parser import parse_voice
 from src.parsers.youtube_parser import parse_youtube
 
 URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+")
-_AUDIO_EXTENSIONS = {".aac", ".flac", ".m4a", ".mp3", ".oga", ".ogg", ".wav", ".weba", ".webm"}
+_VOICE_MEDIA_EXTENSIONS = {
+    ".3gp",
+    ".aac",
+    ".flac",
+    ".m4a",
+    ".m4v",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".mpeg",
+    ".mpg",
+    ".oga",
+    ".ogg",
+    ".wav",
+    ".weba",
+    ".webm",
+}
 
 
 def extract_urls(content: str) -> list[str]:
@@ -33,6 +49,8 @@ def classify_url(url: str) -> str:
     host = parsed.netloc.lower()
     path = parsed.path.lower()
 
+    if _has_voice_mime_fragment(parsed.fragment):
+        return "voice"
     if _is_audio_path(path):
         return "voice"
     if path.endswith(".pdf"):
@@ -93,4 +111,16 @@ def _host_matches(host: str, domain: str) -> bool:
 
 def _is_audio_path(path: str) -> bool:
     suffix = Path(urlparse(path).path).suffix.lower()
-    return suffix in _AUDIO_EXTENSIONS
+    return suffix in _VOICE_MEDIA_EXTENSIONS
+
+
+def _has_voice_mime_fragment(fragment: str) -> bool:
+    if not fragment:
+        return False
+    for key, value in parse_qsl(fragment, keep_blank_values=True):
+        if key.strip().lower() != "tgmime":
+            continue
+        mime_hint = value.strip().lower()
+        if mime_hint.startswith("audio/") or mime_hint.startswith("video/"):
+            return True
+    return False

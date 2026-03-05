@@ -14,6 +14,8 @@ from src.infra.storage import StateStore
 from src.obsidian.search import find_notes, latest_notes
 from src.rag.retriever import RagManager
 
+DELETE_ALL_CONFIRM_TTL_SECONDS = 120
+
 
 def build_command_router(
     store: StateStore,
@@ -35,6 +37,30 @@ def build_command_router(
             return "legacy"
         return build_tenant_context(message.from_user.id).tenant_id
 
+    def _actor_ids(message: Message) -> tuple[int, int]:
+        user_id = message.from_user.id if message.from_user else 0
+        chat_id = message.chat.id if message.chat else user_id
+        return user_id, chat_id
+
+    def _delete_all_notes(tenant_id: str) -> tuple[int, int, int]:
+        rag = rag_manager.for_tenant(tenant_id)
+        tracked_notes = store.list_notes(tenant_id=tenant_id)
+        file_deleted = 0
+        index_deleted = 0
+
+        for note in tracked_notes:
+            note_path = (rag.vault_path / str(note["file_name"])).resolve()
+            if not _is_within(note_path, rag.vault_path.resolve()):
+                continue
+            if note_path.exists():
+                note_path.unlink()
+                file_deleted += 1
+            if rag.remove_note(note_path):
+                index_deleted += 1
+
+        db_deleted = store.delete_all_note_records(tenant_id=tenant_id)
+        return file_deleted, index_deleted, db_deleted
+
     @router.message(Command("start"))
     async def start_handler(message: Message) -> None:
         if not _authorized(message):
@@ -49,7 +75,11 @@ def build_command_router(
             "• <code>/find &lt;запрос&gt;</code> — 🔍 Поиск по заметкам\n"
             "• <code>/summary &lt;вопрос&gt;</code> — 🧠 Задать вопрос по базе (RAG)\n"
             "• <code>/retry &lt;job_id&gt;</code> — ♻️ Перезапустить упавшую задачу\n"
-            "• <code>/delete &lt;ID|файл&gt;</code> — 🗑 Удалить заметку",
+            "• <code>/job &lt;job_id | prefix&gt;</code> — 🧾 Статус конкретной задачи\n"
+            "• <code>/delete &lt;ID|файл&gt;</code> — 🗑 Удалить заметку\n"
+            "• <code>/delete all</code> — 🧹 Запросить удаление всех заметок tenant\n"
+            "• <code>/delete confirm &lt;token&gt;</code> — ✅ Подтвердить массовое удаление\n"
+            "• <code>/delete cancel</code> — ↩️ Отменить массовое удаление",
             parse_mode="HTML"
         )
 
@@ -162,7 +192,7 @@ def build_command_router(
                 return
             safe_answer = html.escape(answer.answer)
             lines = [f"🧠 <b>Вопрос:</b> <code>{safe_query}</code>", "", f"{safe_answer}", "", "📚 <b>На основе заметок:</b>"]
-            for idx, src in enumerate(answer.sources, start=1):
+            for src in answer.sources:
                 safe_file = html.escape(src.file_name)
                 lines.append(f"• <code>{safe_file}</code> <i>(схожесть: {src.score:.2f})</i>")
             await message.answer("\n".join(lines), parse_mode="HTML")
@@ -199,6 +229,46 @@ def build_command_router(
         else:
             await message.answer(f"❌ <b>Ошибка:</b> {safe_details}", parse_mode="HTML")
 
+    @router.message(Command("job"))
+    async def job_handler(message: Message) -> None:
+        if not _authorized(message):
+            return
+
+        job_ref = _extract_args(message)
+        if not job_ref:
+            await message.answer("⚠️ Использование: <code>/job &lt;job_id | prefix&gt;</code>", parse_mode="HTML")
+            return
+
+        tenant_id = _tenant_id(message)
+        ok, resolved = store.resolve_job_ref(job_ref, tenant_id=tenant_id)
+        if not ok:
+            await message.answer(f"❌ <b>Ошибка:</b> {html.escape(str(resolved))}", parse_mode="HTML")
+            return
+        if not isinstance(resolved, dict):
+            await message.answer("❌ <b>Внутренняя ошибка:</b> не удалось прочитать задачу.", parse_mode="HTML")
+            return
+
+        raw_status = str(resolved.get("status") or "")
+        status = _normalize_job_status(raw_status)
+        status_emoji = _job_status_emoji(status)
+        safe_job_id = html.escape(str(resolved.get("job_id") or ""))
+        safe_updated = html.escape(str(resolved.get("updated_at") or "unknown"))
+
+        lines = [
+            "🧾 <b>Статус задачи</b>",
+            "",
+            f"• <b>ID:</b> <code>{safe_job_id}</code>",
+            f"• <b>Статус:</b> {status_emoji} <code>{html.escape(status)}</code>",
+            f"• <b>Обновлено:</b> <code>{safe_updated}</code>",
+        ]
+
+        note_path = str(resolved.get("note_path") or "")
+        if status == "done" and note_path:
+            safe_note = html.escape(Path(note_path).name)
+            lines.append(f"• <b>Заметка:</b> <code>{safe_note}</code>")
+
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
     @router.message(Command("delete"))
     async def delete_handler(message: Message) -> None:
         if not _authorized(message):
@@ -206,10 +276,85 @@ def build_command_router(
 
         note_ref = _extract_args(message)
         if not note_ref:
-            await message.answer("⚠️ Использование: <code>/delete &lt;note_id | job_id | имя файла&gt;</code>", parse_mode="HTML")
+            await message.answer(
+                "⚠️ Использование:\n"
+                "• <code>/delete &lt;note_id | job_id | имя файла&gt;</code>\n"
+                "• <code>/delete all</code>\n"
+                "• <code>/delete confirm &lt;token&gt;</code>\n"
+                "• <code>/delete cancel</code>",
+                parse_mode="HTML",
+            )
             return
 
         tenant_id = _tenant_id(message)
+        normalized = note_ref.strip()
+        lowered = normalized.lower()
+
+        if lowered == "all":
+            user_id, chat_id = _actor_ids(message)
+            confirmation = store.create_delete_all_confirmation(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                chat_id=chat_id,
+                ttl_seconds=DELETE_ALL_CONFIRM_TTL_SECONDS,
+            )
+            safe_token = html.escape(str(confirmation["token"]))
+            await message.answer(
+                "⚠️ <b>Подтверждение обязательно</b>\n\n"
+                "Команда <code>/delete all</code> не выполнена сразу.\n"
+                f"Для подтверждения отправьте <code>/delete confirm {safe_token}</code> в течение 2 минут.\n"
+                "Для отмены отправьте <code>/delete cancel</code>.",
+                parse_mode="HTML",
+            )
+            return
+
+        if lowered == "cancel":
+            user_id, _ = _actor_ids(message)
+            canceled = store.cancel_delete_all_confirmation(tenant_id=tenant_id, user_id=user_id)
+            if canceled:
+                await message.answer("✅ Ожидающее массовое удаление отменено.", parse_mode="HTML")
+            else:
+                await message.answer("ℹ️ Нет активного подтверждения для массового удаления.", parse_mode="HTML")
+            return
+
+        if lowered == "confirm" or lowered.startswith("confirm "):
+            token_parts = normalized.split(maxsplit=1)
+            provided_token = token_parts[1].strip() if len(token_parts) > 1 else None
+            user_id, _ = _actor_ids(message)
+            confirmed, reason = store.consume_delete_all_confirmation(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                token=provided_token,
+            )
+            if not confirmed:
+                if reason == "expired":
+                    await message.answer(
+                        "⌛ Подтверждение истекло. Повторите <code>/delete all</code>.",
+                        parse_mode="HTML",
+                    )
+                    return
+                if reason == "token_mismatch":
+                    await message.answer(
+                        "❌ Неверный токен подтверждения. Повторите <code>/delete all</code>.",
+                        parse_mode="HTML",
+                    )
+                    return
+                await message.answer(
+                    "ℹ️ Нет активного подтверждения. Сначала отправьте <code>/delete all</code>.",
+                    parse_mode="HTML",
+                )
+                return
+
+            file_deleted, index_deleted, db_deleted = _delete_all_notes(tenant_id)
+            await message.answer(
+                "🗑 <b>Массовое удаление завершено</b>\n\n"
+                f"• <b>Файлов удалено:</b> {file_deleted}\n"
+                f"• <b>Документов удалено из RAG:</b> {index_deleted}\n"
+                f"• <b>Записей удалено из БД:</b> {db_deleted}",
+                parse_mode="HTML",
+            )
+            return
+
         resolved_ok, resolved = store.resolve_note_ref(note_ref, tenant_id=tenant_id)
         if not resolved_ok:
             safe_err = html.escape(str(resolved))
@@ -261,6 +406,27 @@ def _extract_args(message: Message) -> str:
 
 def _short_job(job_id: str) -> str:
     return str(job_id)[:10]
+
+
+def _normalize_job_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized == "pending":
+        return "queued"
+    return normalized or "unknown"
+
+
+def _job_status_emoji(status: str) -> str:
+    if status == "queued":
+        return "🕒"
+    if status == "retry":
+        return "♻️"
+    if status == "processing":
+        return "⏳"
+    if status == "done":
+        return "✅"
+    if status == "failed":
+        return "❌"
+    return "⚠️"
 
 
 def _is_within(path: Path, root: Path) -> bool:

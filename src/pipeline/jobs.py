@@ -62,6 +62,7 @@ class JobService:
                 "message_id": request.message_id,
                 "message_datetime": request.message_datetime.isoformat(),
                 "user_id": request.user_id,
+                "forward_source": request.forward_source,
             },
         }
 

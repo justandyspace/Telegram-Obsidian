@@ -12,11 +12,17 @@ from src.infra.logging import get_logger
 
 LOGGER = get_logger(__name__)
 
-_PROMPT = (
+_BASE_PROMPT = (
     "Проанализируй текст и верни JSON с полями: "
-    '{"tags": ["tag1", "tag2"], "summary": "краткая сводка до 280 символов"}. '
+    '{"tags": ["tag1", "tag2"], "summary": "краткая сводка до 280 символов"'
+)
+_PROMPT_SUFFIX = (
+    "}. "
     "Теги: 2-8 штук, без #, в lower_snake_case. "
     "Без дополнительных полей."
+)
+_TRANSLATE_PROMPT = (
+    ', "translation": "полный перевод текста на русский язык (или на английский, если текст уже на русском)"'
 )
 
 
@@ -41,23 +47,34 @@ def enrich_payload_with_ai(
             merged["ai_summary"] = existing_summary
         return merged
 
+    actions = merged.get("actions", [])
+    needs_translation = "translate" in actions
+    
+    prompt = _BASE_PROMPT
+    if needs_translation:
+        prompt += _TRANSLATE_PROMPT
+    prompt += _PROMPT_SUFFIX
+
     try:
         gemini_client = client or genai.Client(api_key=api_key)
         response = gemini_client.models.generate_content(
             model=model_name,
-            contents=f"{_PROMPT}\n\nТекст:\n{base_text}",
+            contents=f"{prompt}\n\nТекст:\n{base_text}",
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 temperature=0.2,
             ),
         )
-        ai_tags, ai_summary = _parse_ai_response(response.text)
+        ai_tags, ai_summary, translation = _parse_ai_response(response.text)
         merged["auto_tags"] = _merge_tags(existing_tags, ai_tags)
         if ai_summary:
             merged["ai_summary"] = ai_summary
             merged["enriched_text"] = _append_summary(base_text, ai_summary)
         elif existing_summary:
             merged["ai_summary"] = existing_summary
+            
+        if translation:
+            merged["translation"] = translation
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning("AI enrichment skipped due to error: %s", exc)
         merged["auto_tags"] = existing_tags
@@ -67,16 +84,17 @@ def enrich_payload_with_ai(
     return merged
 
 
-def _parse_ai_response(response_text: str | None) -> tuple[list[str], str]:
+def _parse_ai_response(response_text: str | None) -> tuple[list[str], str, str]:
     if not response_text:
-        return [], ""
+        return [], "", ""
     try:
         parsed = json.loads(response_text)
     except json.JSONDecodeError:
-        return [], ""
+        return [], "", ""
     tags = _normalize_tags(parsed.get("tags") or [])
     summary = str(parsed.get("summary") or "").strip()
-    return tags, summary
+    translation = str(parsed.get("translation") or "").strip()
+    return tags, summary, translation
 
 
 def _normalize_tags(tags: Any) -> list[str]:

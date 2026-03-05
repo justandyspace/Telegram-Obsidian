@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-MANAGED_BLOCKS = ["BOT_META", "BOT_SUMMARY", "BOT_TASKS", "BOT_LINKS"]
+MANAGED_BLOCKS = ["BOT_META", "BOT_SUMMARY", "BOT_TASKS", "BOT_LINKS", "BOT_TRANSLATION"]
 
 
 def _start_marker(name: str) -> str:

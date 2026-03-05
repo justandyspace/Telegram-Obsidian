@@ -61,6 +61,7 @@ class ObsidianNoteWriter:
             source_message_id=int(payload["source"]["message_id"]),
             source_user_id=int(payload["source"]["user_id"]),
             source_datetime=source_datetime,
+            forward_source=payload["source"].get("forward_source"),
         )
 
         actions = set(payload["actions"])
@@ -84,6 +85,9 @@ class ObsidianNoteWriter:
         )
         if should_update_summary:
             blocks["BOT_SUMMARY"] = self._render_summary(payload, actions)
+            
+        if "translate" in actions and payload.get("translation"):
+            blocks["BOT_TRANSLATION"] = payload["translation"]
 
         merged = merge_managed_blocks(document, blocks)
         note_path.write_text(merged, encoding="utf-8")
@@ -110,6 +114,9 @@ class ObsidianNoteWriter:
             "<!-- BOT_TASKS:START -->\n"
             "pending\n"
             "<!-- BOT_TASKS:END -->\n\n"
+            "<!-- BOT_TRANSLATION:START -->\n"
+            "pending\n"
+            "<!-- BOT_TRANSLATION:END -->\n\n"
             "<!-- BOT_LINKS:START -->\n"
             "pending\n"
             "<!-- BOT_LINKS:END -->\n\n"
@@ -118,11 +125,12 @@ class ObsidianNoteWriter:
         )
 
     def _render_summary(self, payload: dict, actions: set[str]) -> str:
+        ai_summary = payload.get("ai_summary")
+        if ai_summary:
+            return ai_summary
+            
         source_text = payload.get("enriched_text") or payload["content"]
-        summary = short_summary(source_text, max_chars=700)
-        if "translate" in actions:
-            summary = "Translation requested (#translate). Original language preserved in Phase 2.\n\n" + summary
-        return summary
+        return short_summary(source_text, max_chars=700)
 
     def _render_tasks(self, payload: dict) -> str:
         extracted_tasks = []

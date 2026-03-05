@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 LOGGER = logging.getLogger(__name__)
 
 
@@ -46,6 +46,9 @@ class StateStore:
         if current_version < 3:
             self._migrate_to_v3(conn)
             current_version = 3
+        if current_version < 4:
+            self._migrate_to_v4(conn)
+            current_version = 4
 
         self._set_schema_version(conn, current_version)
         self._migrate_legacy_tables(conn)
@@ -309,6 +312,149 @@ class StateStore:
             )
             return int(result.rowcount or 0) > 0
 
+    def list_notes(self, *, tenant_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT tenant_id, content_fingerprint, note_id, file_name, last_job_id
+                FROM notes_mt
+                WHERE tenant_id = ?
+                ORDER BY updated_at DESC
+                """,
+                (tenant_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_all_note_records(self, *, tenant_id: str) -> int:
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                DELETE FROM notes_mt
+                WHERE tenant_id = ?
+                """,
+                (tenant_id,),
+            )
+        return int(result.rowcount or 0)
+
+    def create_delete_all_confirmation(
+        self,
+        *,
+        tenant_id: str,
+        user_id: int,
+        chat_id: int,
+        ttl_seconds: int = 120,
+    ) -> dict[str, Any]:
+        now_dt = datetime.now(UTC)
+        ttl = max(1, int(ttl_seconds))
+        now = now_dt.isoformat()
+        expires_at = (now_dt + timedelta(seconds=ttl)).isoformat()
+        token = uuid.uuid4().hex[:8].upper()
+
+        with self._connect() as conn:
+            self._prune_expired_delete_all_confirmations(conn, now=now)
+            conn.execute(
+                """
+                INSERT INTO delete_all_confirmations_mt (
+                    tenant_id, user_id, chat_id, token, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant_id, user_id) DO UPDATE SET
+                    chat_id = excluded.chat_id,
+                    token = excluded.token,
+                    created_at = excluded.created_at,
+                    expires_at = excluded.expires_at
+                """,
+                (tenant_id, user_id, chat_id, token, now, expires_at),
+            )
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "token": token,
+            "created_at": now,
+            "expires_at": expires_at,
+        }
+
+    def get_delete_all_confirmation(self, *, tenant_id: str, user_id: int) -> dict[str, Any] | None:
+        now = _utc_now_iso()
+        with self._connect() as conn:
+            self._prune_expired_delete_all_confirmations(conn, now=now)
+            row = conn.execute(
+                """
+                SELECT tenant_id, user_id, chat_id, token, created_at, expires_at
+                FROM delete_all_confirmations_mt
+                WHERE tenant_id = ? AND user_id = ?
+                LIMIT 1
+                """,
+                (tenant_id, user_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def consume_delete_all_confirmation(
+        self,
+        *,
+        tenant_id: str,
+        user_id: int,
+        token: str | None = None,
+    ) -> tuple[bool, str]:
+        now = _utc_now_iso()
+        token_value = token.strip().upper() if token else None
+        conn = self._connect()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                """
+                SELECT token, expires_at
+                FROM delete_all_confirmations_mt
+                WHERE tenant_id = ? AND user_id = ?
+                LIMIT 1
+                """,
+                (tenant_id, user_id),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return False, "not_found"
+
+            if str(row["expires_at"]) <= now:
+                conn.execute(
+                    """
+                    DELETE FROM delete_all_confirmations_mt
+                    WHERE tenant_id = ? AND user_id = ?
+                    """,
+                    (tenant_id, user_id),
+                )
+                conn.execute("COMMIT")
+                return False, "expired"
+
+            if token_value and str(row["token"]).upper() != token_value:
+                conn.execute("COMMIT")
+                return False, "token_mismatch"
+
+            conn.execute(
+                """
+                DELETE FROM delete_all_confirmations_mt
+                WHERE tenant_id = ? AND user_id = ?
+                """,
+                (tenant_id, user_id),
+            )
+            conn.execute("COMMIT")
+            return True, "confirmed"
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def cancel_delete_all_confirmation(self, *, tenant_id: str, user_id: int) -> bool:
+        now = _utc_now_iso()
+        with self._connect() as conn:
+            self._prune_expired_delete_all_confirmations(conn, now=now)
+            result = conn.execute(
+                """
+                DELETE FROM delete_all_confirmations_mt
+                WHERE tenant_id = ? AND user_id = ?
+                """,
+                (tenant_id, user_id),
+            )
+        return int(result.rowcount or 0) > 0
+
     def upsert_note(
         self,
         *,
@@ -403,6 +549,67 @@ class StateStore:
                     (limit,),
                 ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_job_status(self, job_id: str, *, tenant_id: str | None = None) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            if tenant_id:
+                row = conn.execute(
+                    """
+                    SELECT job_id, tenant_id, status, error, note_path, updated_at
+                    FROM jobs_mt
+                    WHERE job_id = ? AND tenant_id = ?
+                    LIMIT 1
+                    """,
+                    (job_id, tenant_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT job_id, tenant_id, status, error, note_path, updated_at
+                    FROM jobs_mt
+                    WHERE job_id = ?
+                    LIMIT 1
+                    """,
+                    (job_id,),
+                ).fetchone()
+        return dict(row) if row else None
+
+    def resolve_job_ref(self, job_ref: str, *, tenant_id: str | None = None) -> tuple[bool, dict[str, Any] | str]:
+        ref = job_ref.strip()
+        if not ref:
+            return False, "job_id is required"
+
+        with self._connect() as conn:
+            if tenant_id:
+                rows = conn.execute(
+                    """
+                    SELECT job_id, tenant_id, status, error, note_path, updated_at
+                    FROM jobs_mt
+                    WHERE tenant_id = ? AND (job_id = ? OR job_id LIKE ?)
+                    ORDER BY updated_at DESC
+                    LIMIT 5
+                    """,
+                    (tenant_id, ref, f"{ref}%"),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT job_id, tenant_id, status, error, note_path, updated_at
+                    FROM jobs_mt
+                    WHERE job_id = ? OR job_id LIKE ?
+                    ORDER BY updated_at DESC
+                    LIMIT 5
+                    """,
+                    (ref, f"{ref}%"),
+                ).fetchall()
+
+            if not rows:
+                return False, "job not found"
+            if len(rows) > 1:
+                choices = ", ".join(str(row["job_id"])[:10] for row in rows)
+                return False, f"job id is ambiguous: {choices}"
+
+            return True, dict(rows[0])
 
     def retry_job(self, job_ref: str, tenant_id: str | None = None) -> tuple[bool, str]:
         if not job_ref.strip():
@@ -596,6 +803,27 @@ class StateStore:
             """
         )
 
+    def _migrate_to_v4(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS delete_all_confirmations_mt (
+                tenant_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                token TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, user_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_delete_all_confirmations_mt_expires
+            ON delete_all_confirmations_mt(expires_at)
+            """
+        )
+
     def _migrate_legacy_tables(self, conn: sqlite3.Connection) -> None:
         if _table_exists(conn, "jobs"):
             legacy_rows = conn.execute("SELECT * FROM jobs").fetchall()
@@ -676,6 +904,15 @@ class StateStore:
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
+
+    def _prune_expired_delete_all_confirmations(self, conn: sqlite3.Connection, *, now: str) -> None:
+        conn.execute(
+            """
+            DELETE FROM delete_all_confirmations_mt
+            WHERE expires_at <= ?
+            """,
+            (now,),
+        )
 
 
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
