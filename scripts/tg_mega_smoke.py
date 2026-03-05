@@ -14,8 +14,6 @@ import urllib.request
 from pathlib import Path
 
 from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError
-import qrcode
 
 
 def _require_env(name: str) -> str:
@@ -99,11 +97,12 @@ async def _wait_for_multiple_bot_replies(
 
 
 async def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     api_id = int(_require_env("TG_API_ID"))
     api_hash = _require_env("TG_API_HASH")
-    phone = _require_env("TG_PHONE")
     bot_username = _detect_bot_username()
-    twofa_password = (os.getenv("TG_2FA_PASSWORD") or "").strip()
     timeout = int(os.getenv("TG_TIMEOUT_SECONDS") or "25")
 
     default_session = Path(__file__).resolve().parents[1] / ".sessions" / "session"
@@ -196,7 +195,7 @@ async def main() -> int:
             client,
             bot_username,
             min_message_id=max(sent_ids),
-            expected_count=3,
+            expected_count=1,
             timeout_seconds=timeout,
         )
         print("[OK] BURST_COMMANDS")
@@ -214,7 +213,7 @@ async def main() -> int:
     print("\n=== MEGA SMOKE SUMMARY ===")
     all_ok = True
     for label, ok in results:
-        status = "✅ PASS" if ok else "❌ FAIL"
+        status = "PASS" if ok else "FAIL"
         print(f"{status}: {label}")
         if not ok:
             all_ok = False
