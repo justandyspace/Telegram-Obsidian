@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("bot", "worker")]
+    [ValidateSet("bot", "worker", "watcher")]
     [string]$Role
 )
 

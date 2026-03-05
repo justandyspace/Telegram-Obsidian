@@ -29,7 +29,7 @@ Production-first Telegram bot для сохранения контента в Ob
 
 ## Структура проекта
 
-- `src/main.py` — entrypoint ролей `bot` и `worker`.
+- `src/main.py` — entrypoint ролей `bot`, `worker`, `watcher`.
 - `src/bot` — роутинг Telegram и команды.
 - `src/pipeline` — нормализация, действия, очередь.
 - `src/parsers` — парсинг URL и guarded fetch.
@@ -48,11 +48,12 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-Запустите bot и worker в отдельных терминалах:
+Запустите bot, worker и watcher в отдельных терминалах:
 
 ```bash
 python -m src.main --role bot
 python -m src.main --role worker
+python -m src.main --role watcher
 ```
 
 Для Windows можно использовать:
@@ -88,6 +89,7 @@ Health endpoints:
 - `TELEGRAM_ALLOWED_USER_ID` или `TELEGRAM_ALLOWED_USER_IDS`
 - `TENANT_MODE` (`single` или `multi`)
 - `VAULT_PATH`, `STATE_DIR`, `CACHE_DIR`, `INDEX_DIR`
+- `APP_ROLE` (`bot`, `worker`, `watcher`, `standalone`)
 
 Опционально для RAG-качества:
 
@@ -99,6 +101,10 @@ Health endpoints:
 
 - `WEBHOOK_BASE_URL`
 - `WEBHOOK_SECRET_TOKEN` (длинный случайный секрет)
+
+Для watcher fallback-поллинга:
+
+- `WATCHER_POLL_SECONDS` (интервал polling, если watchdog недоступен)
 
 ## Команды Telegram
 

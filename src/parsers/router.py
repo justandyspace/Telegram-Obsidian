@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from urllib.parse import urlparse
 
 from src.parsers.article_parser import parse_article
 from src.parsers.models import ParseResult
 from src.parsers.pdf_parser import parse_pdf
 from src.parsers.twitter_fallback_parser import parse_twitter_fallback
+from src.parsers.voice_parser import parse_voice
 from src.parsers.youtube_parser import parse_youtube
 
 URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+")
+_AUDIO_EXTENSIONS = {".aac", ".flac", ".m4a", ".mp3", ".oga", ".ogg", ".wav", ".weba", ".webm"}
 
 
 def extract_urls(content: str) -> list[str]:
@@ -30,6 +33,8 @@ def classify_url(url: str) -> str:
     host = parsed.netloc.lower()
     path = parsed.path.lower()
 
+    if _is_audio_path(path):
+        return "voice"
     if path.endswith(".pdf"):
         return "pdf"
     if _host_matches(host, "youtube.com") or _host_matches(host, "youtu.be"):
@@ -39,8 +44,19 @@ def classify_url(url: str) -> str:
     return "article"
 
 
+def classify_source(source: str) -> str:
+    parsed = urlparse(source)
+    if parsed.scheme in {"http", "https"}:
+        return classify_url(source)
+    if _is_audio_path(source):
+        return "voice"
+    return "article"
+
+
 def parse_url(url: str) -> ParseResult:
-    kind = classify_url(url)
+    kind = classify_source(url)
+    if kind == "voice":
+        return parse_voice(url)
     if kind == "pdf":
         return parse_pdf(url)
     if kind == "youtube":
@@ -73,3 +89,8 @@ def _host_matches(host: str, domain: str) -> bool:
     host = host.split("@")[-1].split(":")[0].strip().lower()
     domain = domain.strip().lower()
     return host == domain or host.endswith("." + domain)
+
+
+def _is_audio_path(path: str) -> bool:
+    suffix = Path(urlparse(path).path).suffix.lower()
+    return suffix in _AUDIO_EXTENSIONS

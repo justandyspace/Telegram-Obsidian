@@ -23,6 +23,7 @@ class Phase2ContentUxTests(unittest.TestCase):
     def test_parser_url_classification(self) -> None:
         self.assertEqual(classify_url("https://example.com/doc.pdf"), "pdf")
         self.assertEqual(classify_url("https://youtu.be/abc123"), "youtube")
+        self.assertEqual(classify_url("https://example.com/voice.ogg"), "voice")
         self.assertEqual(
             classify_url("https://x.com/user/status/1234567890"),
             "twitter_fallback",

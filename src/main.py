@@ -18,6 +18,7 @@ from src.infra.storage import StateStore
 from src.pipeline.ai_service import AIService
 from src.pipeline.jobs import JobService
 from src.rag.retriever import RagManager
+from src.watcher import run_watcher
 from src.worker import run_worker
 
 LOGGER = get_logger(__name__)
@@ -193,6 +194,10 @@ async def _run_worker_loop(config: AppConfig, store: StateStore, rag_manager: Ra
         await health.stop()
 
 
+async def _run_watcher_loop(config: AppConfig, rag_manager: RagManager) -> None:
+    await run_watcher(config, rag_manager)
+
+
 async def _async_main(role_override: str | None) -> None:
     config = load_config()
     if role_override:
@@ -222,6 +227,8 @@ async def _async_main(role_override: str | None) -> None:
             await _run_bot_loop(config, store, rag_manager)
         elif config.role == "worker":
             await _run_worker_loop(config, store, rag_manager)
+        elif config.role == "watcher":
+            await _run_watcher_loop(config, rag_manager)
         elif config.role == "standalone":
             await asyncio.gather(
                 _run_bot_loop(config, store, rag_manager),
@@ -236,7 +243,7 @@ async def _async_main(role_override: str | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--role", choices=["bot", "worker", "standalone"], default=None)
+    parser.add_argument("--role", choices=["bot", "worker", "watcher", "standalone"], default=None)
     args = parser.parse_args()
     asyncio.run(_async_main(args.role))
 

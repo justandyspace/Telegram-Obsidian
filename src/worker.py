@@ -11,6 +11,7 @@ from src.infra.logging import get_logger
 from src.infra.storage import StateStore
 from src.obsidian.note_writer import ObsidianNoteWriter
 from src.parsers.router import enrich_payload
+from src.pipeline.enrichment import enrich_payload_with_ai
 from src.rag.embedder import EmbedderError
 from src.rag.retriever import RagManager
 
@@ -46,7 +47,12 @@ async def run_worker(config: AppConfig, store: StateStore, rag_manager: RagManag
 
         LOGGER.info("Processing job_id=%s", job.job_id)
         try:
-            processed_payload = enrich_payload(job.payload)
+            parsed_payload = enrich_payload(job.payload)
+            processed_payload = enrich_payload_with_ai(
+                parsed_payload,
+                api_key=config.gemini_api_key,
+                model_name=config.gemini_generation_model,
+            )
             payload_tenant = str(processed_payload.get("tenant_id") or "legacy")
             if payload_tenant != job.tenant_id:
                 raise RuntimeError(
@@ -77,4 +83,3 @@ async def run_worker(config: AppConfig, store: StateStore, rag_manager: RagManag
             )
             # Prevent tight CPU loop on poison jobs.
             await asyncio.sleep(1)
-

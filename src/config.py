@@ -28,6 +28,7 @@ class AppConfig:
     worker_poll_seconds: float
     worker_recovery_interval_seconds: float
     worker_stuck_timeout_seconds: int
+    watcher_poll_seconds: float
     job_max_retries: int
     bot_health_port: int
     worker_health_port: int
@@ -57,8 +58,8 @@ def _validate_webhook_secret(secret: str) -> None:
 
 def load_config() -> AppConfig:
     role = os.getenv("APP_ROLE", "bot").strip().lower()
-    if role not in {"bot", "worker", "standalone"}:
-        raise RuntimeError("APP_ROLE must be either 'bot', 'worker', or 'standalone'.")
+    if role not in {"bot", "worker", "watcher", "standalone"}:
+        raise RuntimeError("APP_ROLE must be either 'bot', 'worker', 'watcher', or 'standalone'.")
 
     token = os.getenv("TELEGRAM_TOKEN", "").strip()
     if role in {"bot", "standalone"}:
@@ -151,6 +152,7 @@ def load_config() -> AppConfig:
         worker_stuck_timeout_seconds=int(
             os.getenv("WORKER_STUCK_TIMEOUT_SECONDS", "600")
         ),
+        watcher_poll_seconds=float(os.getenv("WATCHER_POLL_SECONDS", "2")),
         job_max_retries=int(os.getenv("JOB_MAX_RETRIES", "5")),
         bot_health_port=int(os.getenv("BOT_HEALTH_PORT", "8080")),
         worker_health_port=int(os.getenv("WORKER_HEALTH_PORT", "8081")),

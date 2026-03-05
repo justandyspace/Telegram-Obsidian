@@ -49,6 +49,15 @@ class ConfigSecurityTests(unittest.TestCase):
             cfg = load_config()
         self.assertEqual(cfg.telegram_mode, "polling")
 
+    def test_watcher_role_is_valid(self) -> None:
+        env = self._base_env()
+        env["APP_ROLE"] = "watcher"
+        env["TELEGRAM_TOKEN"] = ""
+        env["TELEGRAM_ALLOWED_USER_ID"] = ""
+        with patch.dict(os.environ, env, clear=True):
+            cfg = load_config()
+        self.assertEqual(cfg.role, "watcher")
+
 
 if __name__ == "__main__":
     unittest.main()
