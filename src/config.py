@@ -57,11 +57,11 @@ def _validate_webhook_secret(secret: str) -> None:
 
 def load_config() -> AppConfig:
     role = os.getenv("APP_ROLE", "bot").strip().lower()
-    if role not in {"bot", "worker"}:
-        raise RuntimeError("APP_ROLE must be either 'bot' or 'worker'.")
+    if role not in {"bot", "worker", "standalone"}:
+        raise RuntimeError("APP_ROLE must be either 'bot', 'worker', or 'standalone'.")
 
     token = os.getenv("TELEGRAM_TOKEN", "").strip()
-    if role == "bot":
+    if role in {"bot", "standalone"}:
         token = _required("TELEGRAM_TOKEN", token)
 
     multi_tenant_mode = os.getenv("TENANT_MODE", "single").strip().lower() == "multi"
@@ -70,7 +70,7 @@ def load_config() -> AppConfig:
         raise RuntimeError("TELEGRAM_MODE must be one of: auto, polling, webhook.")
     allowed_list_raw = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").strip()
     allowed_single_raw = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
-    if role == "bot" and not allowed_list_raw and not allowed_single_raw:
+    if role in {"bot", "standalone"} and not allowed_list_raw and not allowed_single_raw:
         raise RuntimeError(
             "Set TELEGRAM_ALLOWED_USER_ID or TELEGRAM_ALLOWED_USER_IDS."
         )
@@ -95,7 +95,7 @@ def load_config() -> AppConfig:
         if single_id not in allowed_user_ids:
             allowed_user_ids.append(single_id)
 
-    if role == "bot" and not allowed_user_ids:
+    if role in {"bot", "standalone"} and not allowed_user_ids:
         raise RuntimeError(
             "No allowed Telegram user ids configured. Set TELEGRAM_ALLOWED_USER_ID or TELEGRAM_ALLOWED_USER_IDS."
         )

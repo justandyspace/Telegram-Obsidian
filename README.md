@@ -61,6 +61,12 @@ python -m src.main --role worker
 .\run_local.ps1
 ```
 
+Или одной командой поднять сразу `bot` и `worker`:
+
+```powershell
+.\scripts\start_all.ps1
+```
+
 ## Быстрый старт (Docker Compose)
 
 ```bash
@@ -101,6 +107,7 @@ Health endpoints:
 - `/find <query>` — semantic/keyword поиск по заметкам.
 - `/summary <question>` — grounded summary по индексу.
 - `/retry <job_id_or_prefix>` — ручной ретрай задачи.
+- `/delete <note_id|job_id_prefix|file_name>` — удалить заметку (файл + индекс + DB-запись).
 
 Сообщения можно отправлять с тегами действий:
 
@@ -136,6 +143,24 @@ CI: `.github/workflows/ci.yml`
 - [INCIDENT_PLAYBOOK.md](INCIDENT_PLAYBOOK.md)
 - [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
 - [RELEASE_NOTES.md](RELEASE_NOTES.md)
+
+### Weekly health-check (рекомендуется раз в неделю)
+
+```powershell
+python scripts/weekly_healthcheck.py `
+  --state-db .data/state/bot_state.sqlite3 `
+  --vault-dir local_obsidian_inbox `
+  --obsidian-dir "C:\Users\Desktop\Documents\Obsidian Vault\.obsidian"
+```
+
+## Troubleshooting: заметка не появилась в Obsidian
+
+1. Убедитесь, что запущены оба процесса: `bot` и `worker`.
+2. Проверьте `/status`:
+   - `Queue` не должна застревать в `pending/retry/failed`.
+   - `vault_path` должен указывать на ваш реальный Obsidian vault.
+   - `recent_note_paths` должен показывать пути недавно сохранённых заметок.
+3. Если `TENANT_MODE=multi`, заметки пишутся в подпапку `VAULT_PATH/<tenant_id>` (например, `tg_123456789`).
 
 ## Лицензия
 

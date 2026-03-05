@@ -1,21 +1,19 @@
-$env:APP_ROLE = "bot"
-$env:TELEGRAM_MODE = "polling"
-$env:TELEGRAM_TOKEN = "PUT_TELEGRAM_TOKEN_HERE"
-$env:TELEGRAM_ALLOWED_USER_ID = "PUT_TELEGRAM_USER_ID_HERE"
-$env:TENANT_MODE = "single"
-$env:GEMINI_API_KEY = "PUT_GEMINI_API_KEY_HERE_OR_LEAVE_EMPTY_FOR_HASH_FALLBACK"
-$env:GEMINI_EMBED_MODEL = "gemini-embedding-001"
-$env:GEMINI_GENERATION_MODEL = "gemini-2.5-flash"
-$env:WEBHOOK_BASE_URL = ""
-$env:WEBHOOK_BIND_HOST = "0.0.0.0"
-$env:WEBHOOK_BIND_PORT = "8082"
-$env:WEBHOOK_PATH = "/telegram/webhook"
-$env:WEBHOOK_SECRET_TOKEN = ""
-$env:VAULT_PATH = (Resolve-Path ".\local_obsidian_inbox").Path
-$env:STATE_DIR = (Resolve-Path ".\.data\state").Path
-$env:CACHE_DIR = (Resolve-Path ".\.data\cache").Path
-$env:INDEX_DIR = (Resolve-Path ".\.data\index").Path
-$env:WORKER_RECOVERY_INTERVAL_SECONDS = "30"
-$env:WORKER_STUCK_TIMEOUT_SECONDS = "600"
+if (Test-Path ".env") {
+    foreach($line in Get-Content .env) {
+        if($line -match '^\s*([^#]\w+)\s*=\s*(.*)') {
+            [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2].Trim(), "Process")
+        }
+    }
+} else {
+    Write-Host "Warning: .env file not found."
+}
 
-python -m src.main --role bot
+if (-not $env:VAULT_PATH) { $env:VAULT_PATH = (Resolve-Path ".\local_obsidian_inbox").Path }
+if (-not $env:STATE_DIR) { $env:STATE_DIR = (Resolve-Path ".\.data\state").Path }
+if (-not $env:CACHE_DIR) { $env:CACHE_DIR = (Resolve-Path ".\.data\cache").Path }
+if (-not $env:INDEX_DIR) { $env:INDEX_DIR = (Resolve-Path ".\.data\index").Path }
+$env:APP_ROLE = "standalone"
+
+Write-Host "Starting bot and worker in standalone mode..."
+python -m src.main --role standalone
+

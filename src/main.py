@@ -15,6 +15,7 @@ from src.config import AppConfig, load_config
 from src.infra.health import HealthServer
 from src.infra.logging import configure_logging, get_logger
 from src.infra.storage import StateStore
+from src.pipeline.ai_service import AIService
 from src.pipeline.jobs import JobService
 from src.rag.retriever import RagManager
 from src.worker import run_worker
@@ -24,6 +25,10 @@ LOGGER = get_logger(__name__)
 
 def _build_dispatcher(config: AppConfig, store: StateStore, rag_manager: RagManager) -> Dispatcher:
     dp = Dispatcher()
+    ai_service = AIService(
+        api_key=config.gemini_api_key,
+        model_name=config.gemini_generation_model,
+    )
     dp.include_router(
         build_router(
             job_service=JobService(store, config.job_max_retries),
@@ -31,6 +36,7 @@ def _build_dispatcher(config: AppConfig, store: StateStore, rag_manager: RagMana
             store=store,
             vault_path=config.vault_path,
             rag_manager=rag_manager,
+            ai_service=ai_service,
         )
     )
     return dp
@@ -216,6 +222,11 @@ async def _async_main(role_override: str | None) -> None:
             await _run_bot_loop(config, store, rag_manager)
         elif config.role == "worker":
             await _run_worker_loop(config, store, rag_manager)
+        elif config.role == "standalone":
+            await asyncio.gather(
+                _run_bot_loop(config, store, rag_manager),
+                _run_worker_loop(config, store, rag_manager),
+            )
         else:
             raise RuntimeError(f"Unsupported role: {config.role}")
     finally:
@@ -225,7 +236,7 @@ async def _async_main(role_override: str | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--role", choices=["bot", "worker"], default=None)
+    parser.add_argument("--role", choices=["bot", "worker", "standalone"], default=None)
     args = parser.parse_args()
     asyncio.run(_async_main(args.role))
 

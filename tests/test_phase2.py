@@ -107,6 +107,88 @@ class Phase2ContentUxTests(unittest.TestCase):
         third_summary = _extract_block(third_text, "BOT_SUMMARY")
         self.assertIn("beta changed content", third_summary)
 
+    def test_resolve_and_delete_note_record(self) -> None:
+        store = StateStore(self.root / "state.sqlite3")
+        store.initialize()
+        writer = ObsidianNoteWriter(self.root / "vault", store, multi_tenant=False)
+
+        payload = {
+            "tenant_id": "tg_999",
+            "content": "delete me",
+            "title": "Delete Candidate",
+            "hashtags": [],
+            "actions": ["save"],
+            "parsed_items": [],
+            "content_fingerprint": "e" * 64,
+            "source": {
+                "chat_id": 1,
+                "message_id": 42,
+                "message_datetime": datetime.now(UTC).isoformat(),
+                "user_id": 999,
+            },
+        }
+        note_path = Path(writer.write(job_id="job-delete", payload=payload))
+        self.assertTrue(note_path.exists())
+
+        found_by_note_id, note_data = store.resolve_note_ref("EEEEEEEE", tenant_id="tg_999")
+        self.assertTrue(found_by_note_id)
+        self.assertEqual(note_data["file_name"], note_path.name)
+
+        found_by_job, note_data_by_job = store.resolve_note_ref("job-delete", tenant_id="tg_999")
+        self.assertTrue(found_by_job)
+        self.assertEqual(note_data_by_job["note_id"], note_data["note_id"])
+
+        deleted = store.delete_note_record(
+            tenant_id="tg_999",
+            content_fingerprint=payload["content_fingerprint"],
+        )
+        self.assertTrue(deleted)
+        self.assertIsNone(store.get_note(payload["content_fingerprint"], "tg_999"))
+
+    def test_auto_related_links_are_added(self) -> None:
+        store = StateStore(self.root / "state.sqlite3")
+        store.initialize()
+        writer = ObsidianNoteWriter(self.root / "vault", store, multi_tenant=False)
+
+        base_payload = {
+            "tenant_id": "tg_999",
+            "hashtags": ["ai"],
+            "actions": ["save"],
+            "parsed_items": [],
+            "source": {
+                "chat_id": 1,
+                "message_id": 1,
+                "message_datetime": datetime.now(UTC).isoformat(),
+                "user_id": 999,
+            },
+        }
+
+        first = dict(base_payload)
+        first.update(
+            {
+                "content": "Building an AI roadmap for product analytics",
+                "title": "AI Roadmap",
+                "semantic_hashtags": ["ai", "roadmap"],
+                "content_fingerprint": "1" * 64,
+            }
+        )
+        writer.write(job_id="job-a", payload=first)
+
+        second = dict(base_payload)
+        second.update(
+            {
+                "content": "AI analytics checklist and roadmap updates",
+                "title": "Analytics Checklist",
+                "semantic_hashtags": ["ai", "analytics"],
+                "content_fingerprint": "2" * 64,
+            }
+        )
+        second_path = Path(writer.write(job_id="job-b", payload=second))
+        text = second_path.read_text(encoding="utf-8")
+        links_block = _extract_block(text, "BOT_LINKS")
+        self.assertIn("Related notes (auto)", links_block)
+        self.assertIn("[[", links_block)
+
 
 def _extract_block(document: str, block_name: str) -> str:
     start_marker = f"<!-- {block_name}:START -->"

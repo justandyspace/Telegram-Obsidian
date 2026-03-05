@@ -148,6 +148,17 @@ class IndexStore:
             "chunks": int(chunks["count"]) if chunks else 0,
         }
 
+    def delete_document(self, note_path: str) -> bool:
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM chunks WHERE note_path = ?", (note_path,))
+            deleted_doc = conn.execute(
+                "DELETE FROM documents WHERE note_path = ?",
+                (note_path,),
+            )
+            conn.execute("COMMIT")
+            return int(deleted_doc.rowcount or 0) > 0
+
     @contextmanager
     def _connection(self):
         conn = self._connect()

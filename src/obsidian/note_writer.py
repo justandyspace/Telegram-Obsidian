@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -65,7 +66,11 @@ class ObsidianNoteWriter:
         actions = set(payload["actions"])
         blocks = {
             "BOT_META": render_meta(note_payload),
-            "BOT_LINKS": self._render_links(payload),
+            "BOT_LINKS": self._render_links(
+                payload=payload,
+                resolved_vault=resolved_vault,
+                current_file_name=file_name,
+            ),
         }
 
         if (not existing) or ("task" in actions):
@@ -138,7 +143,7 @@ class ObsidianNoteWriter:
             ]
         )
 
-    def _render_links(self, payload: dict) -> str:
+    def _render_links(self, payload: dict, resolved_vault: Path, current_file_name: str) -> str:
         source = payload.get("source", {})
         lines = [
             (
@@ -158,4 +163,61 @@ class ObsidianNoteWriter:
                     lines.append(f"- mirror: {extra_link}")
             if item.get("error"):
                 lines.append(f"- parser_error: {item['error']}")
+
+        related = self._discover_related_notes(
+            resolved_vault=resolved_vault,
+            current_file_name=current_file_name,
+            payload=payload,
+        )
+        if related:
+            lines.append("")
+            lines.append("### Related notes (auto)")
+            lines.extend(f"- [[{note_stem}]]" for note_stem in related)
+
         return "\n".join(lines)
+
+    def _discover_related_notes(
+        self,
+        *,
+        resolved_vault: Path,
+        current_file_name: str,
+        payload: dict,
+        max_related: int = 8,
+    ) -> list[str]:
+        content = str(payload.get("content", ""))
+        title = str(payload.get("title", ""))
+        semantic_hashtags = [str(tag) for tag in payload.get("semantic_hashtags", [])]
+        parsed_titles = [
+            str(item.get("title", ""))
+            for item in payload.get("parsed_items", [])
+            if str(item.get("title", "")).strip()
+        ]
+        raw_candidates = " ".join([title, content, *semantic_hashtags, *parsed_titles]).lower()
+        query_tokens = self._extract_link_tokens(raw_candidates)
+        if not query_tokens:
+            return []
+
+        results: list[tuple[int, str]] = []
+        for note_path in resolved_vault.rglob("*.md"):
+            if note_path.name == current_file_name:
+                continue
+            note_stem = note_path.stem
+            note_label = self._humanize_note_stem(note_stem).lower()
+            note_tokens = self._extract_link_tokens(note_label)
+            if not note_tokens:
+                continue
+            overlap = len(query_tokens.intersection(note_tokens))
+            if overlap > 0:
+                results.append((overlap, note_stem))
+
+        results.sort(key=lambda item: (-item[0], item[1].lower()))
+        return [note_stem for _, note_stem in results[:max_related]]
+
+    def _extract_link_tokens(self, text: str) -> set[str]:
+        return {token for token in re.findall(r"[a-z0-9]{4,}", text.lower())}
+
+    def _humanize_note_stem(self, note_stem: str) -> str:
+        # Normalize deterministic names like "20260305-1200 - title (AB12CD34)".
+        value = re.sub(r"^\d{8}-\d{4}\s*-\s*", "", note_stem)
+        value = re.sub(r"\s*\([A-Z0-9]{8}\)$", "", value)
+        return value.strip() or note_stem

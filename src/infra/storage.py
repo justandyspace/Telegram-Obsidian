@@ -246,6 +246,69 @@ class StateStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def resolve_note_ref(self, note_ref: str, tenant_id: str) -> tuple[bool, dict[str, Any] | str]:
+        ref = note_ref.strip()
+        if not ref:
+            return False, "note reference is required"
+
+        with self._connect() as conn:
+            by_note_id = conn.execute(
+                """
+                SELECT tenant_id, content_fingerprint, note_id, file_name, last_job_id
+                FROM notes_mt
+                WHERE tenant_id = ? AND note_id = ?
+                LIMIT 5
+                """,
+                (tenant_id, ref.upper()),
+            ).fetchall()
+            if len(by_note_id) == 1:
+                return True, dict(by_note_id[0])
+            if len(by_note_id) > 1:
+                return False, "note id is ambiguous"
+
+            by_job = conn.execute(
+                """
+                SELECT tenant_id, content_fingerprint, note_id, file_name, last_job_id
+                FROM notes_mt
+                WHERE tenant_id = ? AND (last_job_id = ? OR last_job_id LIKE ?)
+                ORDER BY updated_at DESC
+                LIMIT 5
+                """,
+                (tenant_id, ref, f"{ref}%"),
+            ).fetchall()
+            if len(by_job) == 1:
+                return True, dict(by_job[0])
+            if len(by_job) > 1:
+                choices = ", ".join(str(row["note_id"]) for row in by_job)
+                return False, f"job id is ambiguous across notes: {choices}"
+
+            by_file = conn.execute(
+                """
+                SELECT tenant_id, content_fingerprint, note_id, file_name, last_job_id
+                FROM notes_mt
+                WHERE tenant_id = ? AND file_name = ?
+                LIMIT 5
+                """,
+                (tenant_id, ref),
+            ).fetchall()
+            if len(by_file) == 1:
+                return True, dict(by_file[0])
+            if len(by_file) > 1:
+                return False, "file name is ambiguous"
+
+        return False, "note not found"
+
+    def delete_note_record(self, *, tenant_id: str, content_fingerprint: str) -> bool:
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                DELETE FROM notes_mt
+                WHERE tenant_id = ? AND content_fingerprint = ?
+                """,
+                (tenant_id, content_fingerprint),
+            )
+            return int(result.rowcount or 0) > 0
+
     def upsert_note(
         self,
         *,

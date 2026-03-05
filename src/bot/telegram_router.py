@@ -10,6 +10,7 @@ from aiogram.types import Message
 from src.bot.auth import build_tenant_context, is_authorized_user
 from src.bot.commands import build_command_router
 from src.infra.logging import get_logger
+from src.pipeline.ai_service import AIService
 from src.pipeline.ingest import IngestRequest
 from src.pipeline.jobs import JobService
 from src.rag.retriever import RagManager
@@ -24,6 +25,7 @@ def build_router(
     store,
     vault_path,
     rag_manager: RagManager,
+    ai_service: AIService,
 ) -> Router:
     router = Router(name="telegram")
     router.include_router(build_command_router(store, allowed_user_ids, vault_path, rag_manager))
@@ -62,19 +64,11 @@ def build_router(
 
         result = job_service.submit(ingest_request)
         if result.is_new:
-            await message.answer(
-                "Accepted.\n"
-                f"Job: {result.job_id[:10]}\n"
-                f"Tenant: {tenant.tenant_id}\n"
-                f"Actions: {', '.join(sorted(result.actions))}\n"
-                "Track with: /status"
-            )
+            context = f"Действия: {', '.join(sorted(result.actions))}"
+            reply_text = await ai_service.generate_reply(raw_text, context_info=context)
+            await message.answer(reply_text)
             return
 
-        await message.answer(
-            "Duplicate skipped.\n"
-            f"Existing job: {result.job_id[:10]}\n"
-            f"Status: {result.status}"
-        )
+        await message.answer("Я уже обрабатываю эту информацию. Дубликат пропущен.")
 
     return router

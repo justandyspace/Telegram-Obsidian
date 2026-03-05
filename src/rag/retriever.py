@@ -89,6 +89,9 @@ class RagService:
                 break
         return indexed
 
+    def remove_note(self, note_path: Path) -> bool:
+        return self._index_store.delete_document(str(note_path.resolve()))
+
     def find(self, query: str, top_k: int = 5) -> list[RetrievedChunk]:
         query = query.strip()
         if not query:
