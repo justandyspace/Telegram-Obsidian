@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from src.infra.tenancy import tenant_vault_path
 from src.obsidian.block_merge import merge_managed_blocks
 from src.obsidian.note_schema import NotePayload, render_meta
 from src.obsidian.vault_router import deterministic_file_name
+from src.obsidian.couchdb_bridge import CouchDBBridge
 from src.pipeline.normalize import short_summary
 
 
@@ -19,6 +21,20 @@ class ObsidianNoteWriter:
         self._vault_path = vault_path
         self._store = store
         self._multi_tenant = multi_tenant
+        
+        # Initialize CouchDB bridge if configured
+        self._couchdb = None
+        cdb_user = os.getenv("COUCHDB_USER")
+        cdb_pass = os.getenv("COUCHDB_PASSWORD")
+        cdb_db = os.getenv("COUCHDB_DATABASE", "obsidian")
+        if cdb_user and cdb_pass:
+            # We use the internal service name 'couchdb' as defined in docker-compose
+            self._couchdb = CouchDBBridge(
+                url="http://couchdb:5984",
+                user=cdb_user,
+                password=cdb_pass,
+                db_name=cdb_db
+            )
 
     def write(self, *, job_id: str, payload: dict) -> str:
         tenant_id = str(payload.get("tenant_id") or "legacy")
@@ -91,6 +107,10 @@ class ObsidianNoteWriter:
 
         merged = merge_managed_blocks(document, blocks)
         note_path.write_text(merged, encoding="utf-8")
+
+        # Sync to CouchDB if bridge is available
+        if self._couchdb:
+            self._couchdb.push_note(file_name, merged)
 
         self._store.upsert_note(
             content_fingerprint=content_fingerprint,
