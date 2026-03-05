@@ -127,6 +127,18 @@ class TelegramMediaRouterTests(unittest.TestCase):
         url = asyncio.run(_extract_telegram_media_url(message))
         self.assertEqual(url, "")
 
+    def test_video_and_audio_document_are_marked_transcribable(self) -> None:
+        video_message = _message_with_media(
+            bot=_Bot(file_path="video/file_7.mp4"),
+            video=SimpleNamespace(file_id="video_id", mime_type="video/mp4"),
+        )
+        document_message = _message_with_media(
+            bot=_Bot(file_path="documents/file_8"),
+            document=SimpleNamespace(file_id="doc_audio_id", mime_type="audio/ogg"),
+        )
+        self.assertTrue(_is_transcribable_media_message(video_message))
+        self.assertTrue(_is_transcribable_media_message(document_message))
+
     def test_build_voice_ingest_text_keeps_media_url_extractable(self) -> None:
         media_url = "https://api.telegram.org/file/botabc123/voice/file_1.ogg"
         text = _build_voice_ingest_text(caption="Короткий комментарий", media_url=media_url)

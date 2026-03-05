@@ -94,6 +94,14 @@ def build_router(
                 await message.answer("Access denied: this Telegram user is not in allowlist.")
             return
 
+        if from_user is None:
+            await message.answer("Unsupported message source.")
+            return
+
+        if _is_transcribable_media_message(message):
+            await _submit_media_ingest(message, from_user=from_user)
+            return
+
         raw_text = (message.text or message.caption or "").strip()
         if not raw_text:
             await message.answer("Send text or a link with optional hashtags.")
@@ -102,14 +110,6 @@ def build_router(
         message_dt = message.date
         if message_dt.tzinfo is None:
             message_dt = message_dt.replace(tzinfo=UTC)
-
-        if from_user is None:
-            await message.answer("Unsupported message source.")
-            return
-
-        if _is_transcribable_media_message(message):
-            await _submit_media_ingest(message, from_user=from_user)
-            return
 
         tenant = build_tenant_context(from_user)
         forward_source = _extract_forward_source(message)
