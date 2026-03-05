@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 from telethon import TelegramClient
+import qrcode
 
 
 def _require_env(name: str) -> str:
@@ -88,6 +89,7 @@ async def main() -> int:
     commands = _commands_from_env()
     login_code = (os.getenv("TG_LOGIN_CODE") or "").strip()
     twofa_password = (os.getenv("TG_2FA_PASSWORD") or "").strip()
+    login_method = (os.getenv("TG_LOGIN_METHOD") or "").strip().lower()
 
     session_path = Path(
         (os.getenv("TG_SESSION") or str(Path.home() / ".telegram-smoke" / "session")).strip()
@@ -105,7 +107,19 @@ async def main() -> int:
     print()
 
     client = TelegramClient(str(session_path), api_id, api_hash)
-    if login_code:
+    if login_method == "qr":
+        await client.connect()
+        if not await client.is_user_authorized():
+            qr_login = await client.qr_login()
+            print("Scan this QR in Telegram app: Settings -> Devices -> Link Desktop Device")
+            print()
+            qr = qrcode.QRCode(border=1)
+            qr.add_data(qr_login.url)
+            qr.make(fit=True)
+            qr.print_ascii(invert=True)
+            print()
+            await qr_login.wait(timeout=120)
+    elif login_code:
         await client.start(
             phone=phone,
             code_callback=lambda: login_code,
