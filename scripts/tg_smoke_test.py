@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError
 import qrcode
 
 
@@ -90,6 +91,7 @@ async def main() -> int:
     login_code = (os.getenv("TG_LOGIN_CODE") or "").strip()
     twofa_password = (os.getenv("TG_2FA_PASSWORD") or "").strip()
     login_method = (os.getenv("TG_LOGIN_METHOD") or "").strip().lower()
+    auth_mode = (os.getenv("TG_AUTH_MODE") or "").strip().lower()
 
     session_path = Path(
         (os.getenv("TG_SESSION") or str(Path.home() / ".telegram-smoke" / "session")).strip()
@@ -107,6 +109,43 @@ async def main() -> int:
     print()
 
     client = TelegramClient(str(session_path), api_id, api_hash)
+    auth_meta_path = session_path.with_suffix(".auth.json")
+
+    if auth_mode == "request-code":
+        await client.connect()
+        sent = await client.send_code_request(phone)
+        auth_meta_path.write_text(
+            json.dumps({"phone": phone, "phone_code_hash": sent.phone_code_hash}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        await client.disconnect()
+        print("Code requested. Send the code here and I will complete login.")
+        return 0
+
+    if auth_mode == "complete-login":
+        if not auth_meta_path.exists():
+            raise SystemExit(f"Missing auth meta file: {auth_meta_path}. Run TG_AUTH_MODE=request-code first.")
+        if not login_code:
+            raise SystemExit("Missing TG_LOGIN_CODE for complete-login mode.")
+        meta = json.loads(auth_meta_path.read_text(encoding="utf-8"))
+        await client.connect()
+        try:
+            try:
+                await client.sign_in(
+                    phone=str(meta["phone"]),
+                    code=login_code,
+                    phone_code_hash=str(meta["phone_code_hash"]),
+                )
+            except SessionPasswordNeededError:
+                if not twofa_password:
+                    raise SystemExit("2FA password required. Set TG_2FA_PASSWORD.")
+                await client.sign_in(password=twofa_password)
+            if not await client.is_user_authorized():
+                raise SystemExit("Login failed: session is not authorized.")
+        finally:
+            await client.disconnect()
+        print("Login completed and session saved.")
+        return 0
     if login_method == "qr":
         await client.connect()
         if not await client.is_user_authorized():
