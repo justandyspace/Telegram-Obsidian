@@ -673,13 +673,10 @@ def _display_note_name(file_name: str) -> str:
 
 def _source_label(file_name: str, index: int) -> str:
     display = _display_note_name(file_name).strip()
-    generic = {
-        "",
-        "Сохранённая заметка",
-        "Сохранённый материал",
-    }
-    if display in generic:
-        return f"Источник {index}"
+    if display in {"", "Сохранённая заметка"}:
+        return f"Заметка {index}"
+    if display == "Сохранённый материал":
+        return f"Материал {index}"
     return display
 
 
