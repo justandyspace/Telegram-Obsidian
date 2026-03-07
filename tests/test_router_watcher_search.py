@@ -163,15 +163,15 @@ class TelegramRouterRuntimeTests(unittest.TestCase):
 
         unauthorized = _FakeMessage(text="hello", user_id=2)
         asyncio.run(handlers["intake_handler"](unauthorized))
-        self.assertIn("Access denied", unauthorized.answers[0])
+        self.assertIn("Доступ закрыт", unauthorized.answers[0])
 
         missing_user = _FakeMessage(text="hello", user_id=None)
         asyncio.run(handlers["intake_handler"](missing_user))
-        self.assertIn("Access denied", missing_user.answers[0])
+        self.assertIn("Доступ закрыт", missing_user.answers[0])
 
         empty = _FakeMessage(text="   ")
         asyncio.run(handlers["intake_handler"](empty))
-        self.assertIn("Send text or a link", empty.answers[0])
+        self.assertIn("Пришли текст", empty.answers[0])
 
         created = _FakeMessage(text="hello #save")
         asyncio.run(handlers["intake_handler"](created))
@@ -238,11 +238,11 @@ class TelegramRouterRuntimeTests(unittest.TestCase):
 
         unauthorized = _FakeMessage(document=SimpleNamespace(mime_type="audio/mpeg", file_id="f1"), user_id=3)
         asyncio.run(handlers["media_intake_handler"](unauthorized))
-        self.assertIn("Access denied", unauthorized.answers[0])
+        self.assertIn("Доступ закрыт", unauthorized.answers[0])
 
         missing_user = _FakeMessage(document=SimpleNamespace(mime_type="audio/mpeg", file_id="f1"), user_id=None)
         asyncio.run(handlers["media_intake_handler"](missing_user))
-        self.assertIn("Access denied", missing_user.answers[0])
+        self.assertIn("Доступ закрыт", missing_user.answers[0])
 
         ignored = _FakeMessage(document=SimpleNamespace(mime_type="text/plain", file_id="f1"))
         asyncio.run(handlers["media_intake_handler"](ignored))

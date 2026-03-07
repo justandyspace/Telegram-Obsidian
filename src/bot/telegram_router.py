@@ -54,7 +54,7 @@ def build_router(
         from_user = message.from_user.id if message.from_user else None
         if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
             if message.chat.type == "private":
-                await message.answer("Access denied: this Telegram user is not in allowlist.")
+                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
             return
         if message.text == "⚙️ Управление":
             await message.answer(
@@ -68,7 +68,7 @@ def build_router(
             )
             return
         if from_user is None:
-            await message.answer("Unsupported message source.")
+            await message.answer("⚠️ Не удалось определить источник сообщения.")
             return
 
         tenant = build_tenant_context(from_user)
@@ -98,7 +98,7 @@ def build_router(
         from_user = message.from_user.id if message.from_user else None
         if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
             if message.chat.type == "private":
-                await message.answer("Access denied: this Telegram user is not in allowlist.")
+                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
             return
         if message.text == "➕ Добавить":
             await message.answer(
@@ -114,7 +114,7 @@ def build_router(
             )
             return
         if from_user is None:
-            await message.answer("Unsupported message source.")
+            await message.answer("⚠️ Не удалось определить источник сообщения.")
             return
 
         tenant = build_tenant_context(from_user)
@@ -122,7 +122,7 @@ def build_router(
         if not recent:
             await message.answer("📭 База знаний пока пуста.", parse_mode="HTML", reply_markup=build_quick_actions_keyboard(mini_app_base_url))
             return
-        lines = ["🕘 <b>Последние заметки</b>", "", "────────────"]
+        lines = ["🕘 <b>Последнее из базы</b>", "", "────────────"]
         for idx, item in enumerate(recent, start=1):
             display_name = item.get("display_name") or humanize_note_label(item["file_name"])
             lines.append(f"<b>{idx}.</b> <code>{display_name}</code>")
@@ -139,10 +139,10 @@ def build_router(
         from_user = message.from_user.id if message.from_user else None
         if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
             if message.chat.type == "private":
-                await message.answer("Access denied: this Telegram user is not in allowlist.")
+                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
             return
         await message.answer(
-            "🔎 <b>Найти и Поиск</b>\n\n"
+            "🔎 <b>Поиск по базе</b>\n\n"
             "Что можно сделать:\n"
             "• <code>/find запрос</code> для быстрого поиска\n"
             "• <code>/summary вопрос</code> для ответа по базе\n"
@@ -156,7 +156,7 @@ def build_router(
         from_user = message.from_user.id if message.from_user else None
         if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
             if message.chat.type == "private":
-                await message.answer("Access denied: this Telegram user is not in allowlist.")
+                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
             return
         await message.answer(
             "🗑 <b>Удаление</b>\n\n"
@@ -234,11 +234,11 @@ def build_router(
         if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
             LOGGER.warning("Rejected unauthorized message: user_id=%s", from_user)
             if message.chat.type == "private":
-                await message.answer("Access denied: this Telegram user is not in allowlist.")
+                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
             return
 
         if from_user is None:
-            await message.answer("Unsupported message source.")
+            await message.answer("⚠️ Не удалось определить источник сообщения.")
             return
 
         if _is_transcribable_media_message(message):
@@ -247,7 +247,7 @@ def build_router(
 
         raw_text = (message.text or message.caption or "").strip()
         if not raw_text:
-            await message.answer("Send text or a link with optional hashtags.")
+            await message.answer("Пришли текст, ссылку или заметку. Если хочешь, можешь добавить теги вроде <code>#save</code>.", parse_mode="HTML")
             return
 
         message_dt = message.date
@@ -309,11 +309,11 @@ def build_router(
         if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
             LOGGER.warning("Rejected unauthorized media message: user_id=%s", from_user)
             if message.chat.type == "private":
-                await message.answer("Access denied: this Telegram user is not in allowlist.")
+                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
             return
 
         if from_user is None:
-            await message.answer("Unsupported message source.")
+            await message.answer("⚠️ Не удалось определить источник сообщения.")
             return
 
         await _submit_media_ingest(message, from_user=from_user)

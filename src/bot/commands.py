@@ -190,7 +190,7 @@ def build_command_router(
         if not _authorized(message):
             return
         await message.answer(
-            "🔎 <b>Найти и Поиск</b>\n\n"
+            "🔎 <b>Поиск по базе</b>\n\n"
             "Что можно сделать:\n"
             "• <code>/find запрос</code> для быстрого поиска\n"
             "• <code>/summary вопрос</code> для ответа по базе\n"
@@ -215,7 +215,7 @@ def build_command_router(
     async def status_handler(message: Message) -> None:
         _log_command(message, "/status")
         if not _authorized(message):
-            await message.answer("Access denied: this Telegram user is not in allowlist.")
+            await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
             return
 
         tenant_id = _tenant_id(message)

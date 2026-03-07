@@ -147,7 +147,7 @@ class CommandRouterRuntimeTests(unittest.TestCase):
         denied_router = _handlers(store, self.rag_manager, self.vault, allowed={2})
         denied = _FakeMessage("/status")
         asyncio.run(denied_router["status_handler"](denied))
-        self.assertIn("Access denied", denied.answers[0][0])
+        self.assertIn("Доступ закрыт", denied.answers[0][0])
 
     def test_find_handler_covers_semantic_text_and_empty_paths(self) -> None:
         store = MagicMock()

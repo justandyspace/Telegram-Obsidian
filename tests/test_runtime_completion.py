@@ -257,7 +257,7 @@ class RuntimeCompletionTests(unittest.TestCase):
         unsupported = RouteMessage(text="hello", user_id=None)
         with patch("src.bot.telegram_router.is_authorized_user", return_value=True):
             asyncio.run(handlers["intake_handler"](unsupported))
-        self.assertIn("Unsupported message source.", unsupported.answers[0])
+        self.assertIn("Не удалось определить источник", unsupported.answers[0])
 
         naive = RouteMessage(text="hello", date=datetime(2026, 3, 5, 12, 0))
         with patch("src.bot.telegram_router.is_authorized_user", return_value=True):
@@ -268,7 +268,7 @@ class RuntimeCompletionTests(unittest.TestCase):
         media_unsupported = RouteMessage(voice=SimpleNamespace(file_id="f1"), user_id=None, bot=RouterBot())
         with patch("src.bot.telegram_router.is_authorized_user", return_value=True):
             asyncio.run(handlers["media_intake_handler"](media_unsupported))
-        self.assertIn("Unsupported message source.", media_unsupported.answers[0])
+        self.assertIn("Не удалось определить источник", media_unsupported.answers[0])
 
         media_naive = RouteMessage(voice=SimpleNamespace(file_id="f2"), bot=RouterBot(), date=datetime(2026, 3, 5, 12, 0))
         with patch("src.bot.telegram_router.is_authorized_user", return_value=True), patch(
