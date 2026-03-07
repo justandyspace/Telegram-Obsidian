@@ -146,7 +146,7 @@ def build_router(
                 "Что можно сделать:\n"
                 "• <code>/find запрос</code> для быстрого поиска\n"
                 "• <code>/summary вопрос</code> для ответа по базе\n"
-                "• кнопка <b>📲 База</b> для полного поиска и просмотра заметок",
+                "• Mini App пока нет, так что полный поиск тоже временно через чат-команды",
                 parse_mode="HTML",
                 reply_markup=build_quick_actions_keyboard(mini_app_base_url),
             )
