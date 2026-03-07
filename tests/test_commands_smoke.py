@@ -15,7 +15,7 @@ class CommandsSmokeTests(unittest.TestCase):
         source = inspect.getsource(commands_module.build_command_router)
         self.assertIn("🤖 <b>Привет. Это твой быстрый inbox для знаний.</b>", source)
         self.assertIn("⚡ <b>Что можно сделать прямо сейчас</b>", source)
-        self.assertIn("Mini App нужен для полного поиска", source)
+        self.assertIn("Mini App потом будет удобнее", source)
 
     def test_delete_flow_uses_confirmation_methods(self) -> None:
         source = inspect.getsource(commands_module.build_command_router)

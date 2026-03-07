@@ -108,7 +108,6 @@ def command_handlers(store, rag_manager, vault_path: Path, allowed: set[int] | N
     router = build_command_router(
         store,
         allowed or {1},
-        vault_path,
         rag_manager,
         mini_app_base_url="https://miniapp.example.test/app",
     )

@@ -30,19 +30,9 @@ LOGGER = get_logger(__name__)
 def build_command_router(
     store: StateStore,
     allowed_user_ids: set[int],
-    *compat_args,
+    rag_manager,
     mini_app_base_url: str = "",
-    **_compat_kwargs,
 ) -> Router:
-    rag_manager = None
-    for value in compat_args:
-        if hasattr(value, "for_tenant"):
-            rag_manager = value
-    if not mini_app_base_url:
-        for value in reversed(compat_args):
-            if isinstance(value, str) and value.strip():
-                mini_app_base_url = value
-                break
     if rag_manager is None:
         raise RuntimeError("build_command_router requires a RagManager instance.")
     router = Router(name="commands")
@@ -143,7 +133,7 @@ def build_command_router(
             "• <code>/find &lt;запрос&gt;</code> для быстрого поиска\n"
             "• <code>/summary &lt;вопрос&gt;</code> для ответа по базе\n"
             "• <code>/status</code> для короткой сводки\n\n"
-            "Mini App нужен для полного поиска, чтения заметок и разбора очереди.",
+            "Через Mini App потом будет удобнее смотреть базу целиком, но для старта чатовых команд уже достаточно.",
             parse_mode="HTML",
             reply_markup=_quick_actions_markup(),
         )

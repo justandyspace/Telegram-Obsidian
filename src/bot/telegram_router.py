@@ -15,10 +15,8 @@ from src.bot.auth import build_tenant_context, is_authorized_user
 from src.bot.commands import build_command_router
 from src.bot.keyboards import build_quick_actions_keyboard
 from src.infra.logging import get_logger
-from src.infra.runtime_state import last_error, uptime_human
 from src.infra.telemetry import track_event
 from src.obsidian.display import humanize_note_label
-from src.obsidian.search import latest_notes
 from src.pipeline.ai_service import AIService
 from src.pipeline.ingest import IngestRequest
 from src.pipeline.jobs import JobService
@@ -43,128 +41,10 @@ def build_router(
         build_command_router(
             store,
             allowed_user_ids,
-            vault_path,
             rag_manager,
             mini_app_base_url=mini_app_base_url,
         )
     )
-
-    @router.message((F.text == "⚙️ Управление") | (F.text == "📊 Статус"))
-    async def quick_status_button_handler(message: Message) -> None:
-        from_user = message.from_user.id if message.from_user else None
-        if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
-            if message.chat.type == "private":
-                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
-            return
-        if message.text == "⚙️ Управление":
-            await message.answer(
-                "⚙️ <b>Управление</b>\n\n"
-                "Здесь всё служебное:\n"
-                "• <code>/status</code> для состояния очереди и индекса\n"
-                "• <code>/delete имя_файла.md</code> для удаления одной заметки\n"
-                "• <code>/delete cancel</code> для отмены массового удаления",
-                parse_mode="HTML",
-                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
-            )
-            return
-        if from_user is None:
-            await message.answer("⚠️ Не удалось определить источник сообщения.")
-            return
-
-        tenant = build_tenant_context(from_user)
-        rag = rag_manager.for_tenant(tenant.tenant_id)
-        counts = store.status_counts(tenant_id=tenant.tenant_id)
-        integrity_ok, _ = store.integrity_check()
-        err_text, _ = last_error()
-        rag_stats = rag.stats()
-        lines = ["📊 <b>Короткая сводка</b>", "────────────"]
-        if counts:
-            for key, value in sorted(counts.items(), key=lambda item: item[0]):
-                lines.append(f"• {key}: <b>{value}</b>")
-        else:
-            lines.append("• Очередь пуста")
-        lines.append(f"• Индекс: <b>{rag_stats['documents']}</b> заметок / <b>{rag_stats['chunks']}</b> фрагментов")
-        lines.append(f"• Хранилище: {'✅ OK' if integrity_ok else '❌ требует внимания'}")
-        lines.append(f"• Аптайм: <code>{uptime_human()}</code>")
-        lines.append(f"• Runtime: <code>{(err_text or 'без ошибок')[:80]}</code>" if err_text else "• Runtime: <b>без ошибок</b>")
-        await message.answer(
-            "\n".join(lines),
-            parse_mode="HTML",
-            reply_markup=build_quick_actions_keyboard(mini_app_base_url),
-        )
-
-    @router.message((F.text == "➕ Добавить") | (F.text == "🕘 Последние"))
-    async def quick_latest_button_handler(message: Message) -> None:
-        from_user = message.from_user.id if message.from_user else None
-        if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
-            if message.chat.type == "private":
-                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
-            return
-        if message.text == "➕ Добавить":
-            await message.answer(
-                "➕ <b>Добавить</b>\n\n"
-                "Просто отправь сюда:\n"
-                "• текст или идею\n"
-                "• ссылку\n"
-                "• голосовое\n"
-                "• фото или документ\n\n"
-                "Если нужно, можешь дописать теги вроде <code>#save</code> или <code>#summary</code>.",
-                parse_mode="HTML",
-                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
-            )
-            return
-        if from_user is None:
-            await message.answer("⚠️ Не удалось определить источник сообщения.")
-            return
-
-        tenant = build_tenant_context(from_user)
-        recent = latest_notes(rag_manager.for_tenant(tenant.tenant_id).vault_path, limit=5)
-        if not recent:
-            await message.answer("📭 База знаний пока пуста.", parse_mode="HTML", reply_markup=build_quick_actions_keyboard(mini_app_base_url))
-            return
-        lines = ["🕘 <b>Последнее из базы</b>", "", "────────────"]
-        for idx, item in enumerate(recent, start=1):
-            display_name = item.get("display_name") or humanize_note_label(item["file_name"])
-            lines.append(f"<b>{idx}.</b> <code>{display_name}</code>")
-            lines.append(f"💬 <i>{item['snippet']}</i>")
-            lines.append("")
-        await message.answer(
-            "\n".join(lines),
-            parse_mode="HTML",
-            reply_markup=build_quick_actions_keyboard(mini_app_base_url),
-        )
-
-    @router.message((F.text == "🔎 Найти") | (F.text == "🔎 Поиск"))
-    async def quick_search_button_handler(message: Message) -> None:
-        from_user = message.from_user.id if message.from_user else None
-        if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
-            if message.chat.type == "private":
-                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
-            return
-        await message.answer(
-            "🔎 <b>Поиск по базе</b>\n\n"
-            "Что можно сделать:\n"
-            "• <code>/find запрос</code> для быстрого поиска\n"
-            "• <code>/summary вопрос</code> для ответа по базе\n"
-            "• кнопка <b>📲 База</b> для полного поиска и просмотра заметок",
-            parse_mode="HTML",
-            reply_markup=build_quick_actions_keyboard(mini_app_base_url),
-        )
-
-    @router.message(F.text == "🗑 Удаление")
-    async def quick_delete_button_handler(message: Message) -> None:
-        from_user = message.from_user.id if message.from_user else None
-        if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
-            if message.chat.type == "private":
-                await message.answer("❌ Доступ закрыт. Этот Telegram-аккаунт не добавлен в список разрешённых.")
-            return
-        await message.answer(
-            "🗑 <b>Удаление</b>\n\n"
-            "Отмена массового удаления: <code>/delete cancel</code>\n"
-            "Удаление одной заметки: <code>/delete имя_файла.md</code>",
-            parse_mode="HTML",
-            reply_markup=build_quick_actions_keyboard(mini_app_base_url),
-        )
 
     async def _submit_media_ingest(message: Message, *, from_user: int) -> None:
         media_url = await _extract_telegram_media_url(message)

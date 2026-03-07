@@ -183,27 +183,14 @@ class TelegramRouterRuntimeTests(unittest.TestCase):
         asyncio.run(handlers["intake_handler"](duplicate))
         self.assertIn("Дубликат пропущен", duplicate.answers[0])
 
-    def test_quick_button_handlers_return_ui_responses(self) -> None:
-        store = MagicMock()
-        store.status_counts.return_value = {"pending": 1}
-        store.integrity_check.return_value = (True, "ok")
-        handlers = _router_handlers(_FakeJobService([]), {1}, store=store, ai_service=_FakeAIService())
-
-        status = _FakeMessage(text="📊 Статус")
-        asyncio.run(handlers["quick_status_button_handler"](status))
-        self.assertIn("Короткая сводка", status.answers[0])
-
-        latest = _FakeMessage(text="🕘 Последние")
-        asyncio.run(handlers["quick_latest_button_handler"](latest))
-        self.assertTrue(latest.answers)
-
-        search = _FakeMessage(text="🔎 Поиск")
-        asyncio.run(handlers["quick_search_button_handler"](search))
-        self.assertIn("Поиск", search.answers[0])
-
-        delete = _FakeMessage(text="🗑 Удаление")
-        asyncio.run(handlers["quick_delete_button_handler"](delete))
-        self.assertIn("Удаление", delete.answers[0])
+    def test_router_keeps_only_ingest_specific_handlers(self) -> None:
+        handlers = _router_handlers(_FakeJobService([]), {1}, store=MagicMock(), ai_service=_FakeAIService())
+        self.assertIn("intake_handler", handlers)
+        self.assertIn("media_intake_handler", handlers)
+        self.assertNotIn("quick_status_button_handler", handlers)
+        self.assertNotIn("quick_latest_button_handler", handlers)
+        self.assertNotIn("quick_search_button_handler", handlers)
+        self.assertNotIn("quick_delete_button_handler", handlers)
 
     def test_media_handlers_cover_failures_new_duplicate_and_ignore(self) -> None:
         results = [

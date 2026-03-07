@@ -81,7 +81,6 @@ class _FakeRagManager:
 def _handlers(
     store,
     rag_manager,
-    vault_path: Path,
     allowed: set[int] | None = None,
     *,
     mini_app_base_url: str = "https://miniapp.example.test/app",
@@ -89,7 +88,6 @@ def _handlers(
     router = build_command_router(
         store,
         allowed or {1},
-        vault_path,
         rag_manager,
         mini_app_base_url=mini_app_base_url,
     )
@@ -109,14 +107,14 @@ class CommandRouterRuntimeTests(unittest.TestCase):
 
     def test_start_handler_authorized_and_unauthorized(self) -> None:
         store = MagicMock()
-        callbacks = _handlers(store, self.rag_manager, self.vault)
+        callbacks = _handlers(store, self.rag_manager)
 
         allowed = _FakeMessage("/start")
         asyncio.run(callbacks["start_handler"](allowed))
         self.assertIn("Привет", allowed.answers[0][0])
         self.assertIsNotNone(allowed.reply_markups[0])
 
-        denied_router = _handlers(store, self.rag_manager, self.vault, allowed={2})
+        denied_router = _handlers(store, self.rag_manager, allowed={2})
         denied = _FakeMessage("/start")
         asyncio.run(denied_router["start_handler"](denied))
         self.assertIn("отказано", denied.answers[0][0])
@@ -128,7 +126,7 @@ class CommandRouterRuntimeTests(unittest.TestCase):
         store.recent_jobs.return_value = [{"status": "done", "note_path": str(self.vault / "note.md")}]
         store.integrity_check.return_value = (False, "db broken")
         self.rag.stats_value = {"documents": 3, "chunks": 7, "provider": "hash-fallback"}
-        callbacks = _handlers(store, self.rag_manager, self.vault)
+        callbacks = _handlers(store, self.rag_manager)
 
         with patch("src.bot.commands.uptime_human", return_value="1m"), patch(
             "src.bot.commands.last_error",
@@ -144,14 +142,14 @@ class CommandRouterRuntimeTests(unittest.TestCase):
         self.assertIn("fatal", text)
         self.assertIsNotNone(msg.reply_markups[0])
 
-        denied_router = _handlers(store, self.rag_manager, self.vault, allowed={2})
+        denied_router = _handlers(store, self.rag_manager, allowed={2})
         denied = _FakeMessage("/status")
         asyncio.run(denied_router["status_handler"](denied))
         self.assertIn("Доступ закрыт", denied.answers[0][0])
 
     def test_find_handler_covers_semantic_text_and_empty_paths(self) -> None:
         store = MagicMock()
-        callbacks = _handlers(store, self.rag_manager, self.vault)
+        callbacks = _handlers(store, self.rag_manager)
 
         no_args = _FakeMessage("/find")
         asyncio.run(callbacks["find_handler"](no_args))
@@ -188,7 +186,7 @@ class CommandRouterRuntimeTests(unittest.TestCase):
 
     def test_summary_handler_covers_question_and_latest_views(self) -> None:
         store = MagicMock()
-        callbacks = _handlers(store, self.rag_manager, self.vault)
+        callbacks = _handlers(store, self.rag_manager)
 
         too_long = _FakeMessage("/summary " + ("оченьдлинныйтекст " * 100))
         asyncio.run(callbacks["summary_handler"](too_long))
@@ -251,7 +249,7 @@ class CommandRouterRuntimeTests(unittest.TestCase):
                 },
             ),
         ]
-        callbacks = _handlers(store, self.rag_manager, self.vault)
+        callbacks = _handlers(store, self.rag_manager)
 
         no_retry_arg = _FakeMessage("/retry")
         asyncio.run(callbacks["retry_handler"](no_retry_arg))
@@ -286,7 +284,7 @@ class CommandRouterRuntimeTests(unittest.TestCase):
         store = StateStore(Path(self._tmp.name) / "state.sqlite3")
         store.initialize()
         try:
-            callbacks = _handlers(store, self.rag_manager, self.vault)
+            callbacks = _handlers(store, self.rag_manager)
 
             no_args = _FakeMessage("/delete")
             asyncio.run(callbacks["delete_handler"](no_args))
