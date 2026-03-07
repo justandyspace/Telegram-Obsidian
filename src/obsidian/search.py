@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from src.obsidian.display import humanize_note_label
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -31,6 +33,7 @@ def find_notes(vault_path: Path, query: str, limit: int = 5) -> list[dict[str, s
         matches.append(
             {
                 "file_name": note_file.name,
+                "display_name": humanize_note_label(note_file.name),
                 "snippet": snippet[:280],
                 "score": str(score),
             }
@@ -53,6 +56,7 @@ def latest_notes(vault_path: Path, limit: int = 5) -> list[dict[str, str]]:
         items.append(
             {
                 "file_name": note_file.name,
+                "display_name": humanize_note_label(note_file.name),
                 "snippet": first_line[:160],
             }
         )

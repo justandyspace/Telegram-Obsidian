@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ from src.bot.keyboards import build_quick_actions_keyboard
 from src.infra.logging import get_logger
 from src.infra.runtime_state import last_error, uptime_human
 from src.infra.telemetry import track_event
+from src.obsidian.display import humanize_note_label
 from src.obsidian.search import latest_notes
 from src.pipeline.ai_service import AIService
 from src.pipeline.ingest import IngestRequest
@@ -124,7 +124,8 @@ def build_router(
             return
         lines = ["🕘 <b>Последние заметки</b>", "", "────────────"]
         for idx, item in enumerate(recent, start=1):
-            lines.append(f"<b>{idx}.</b> <code>{item['file_name']}</code>")
+            display_name = item.get("display_name") or humanize_note_label(item["file_name"])
+            lines.append(f"<b>{idx}.</b> <code>{display_name}</code>")
             lines.append(f"💬 <i>{item['snippet']}</i>")
             lines.append("")
         await message.answer(
@@ -466,21 +467,10 @@ def _build_voice_ingest_text(*, caption: str, media_url: str) -> str:
 
 
 def _display_note_name(file_name: str) -> str:
-    stem = Path(file_name).stem
-    match = re.match(r"^\d{8}-\d{4}\s*-\s*(.+)\s+\([A-Z0-9]{8}\)$", stem)
-    if match:
-        value = match.group(1).strip()[:80]
-    else:
-        value = stem[:80]
-    if re.fullmatch(r"note(?:\s+\S+)?", value, re.IGNORECASE):
-        return "Сохранённая заметка"
-    if value.lower().startswith(("http ", "https ", "www ")):
-        compact = value.replace("https ", "").replace("http ", "").replace("www ", "")
-        compact = compact.split()[0].strip("/:-")
-        if compact:
-            return f"Материал из {compact}"[:80]
-        return "Сохранённый материал"
-    return value or "Сохранённая заметка"
+    display = humanize_note_label(file_name)
+    if display == Path(file_name).name:
+        display = Path(file_name).stem
+    return display[:80]
 
 
 def _humanize_note_destination(*, note_path: Path, base_vault_path: Path | None) -> tuple[str, str]:

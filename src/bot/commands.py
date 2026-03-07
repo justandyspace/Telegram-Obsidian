@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import re
 from pathlib import Path
 
 from aiogram import F, Router
@@ -17,6 +16,7 @@ from src.infra.logging import get_logger
 from src.infra.runtime_state import last_error, uptime_human
 from src.infra.storage import StateStore
 from src.infra.telemetry import track_event
+from src.obsidian.display import humanize_note_label
 from src.obsidian.search import find_notes, latest_notes
 from src.rag.retriever import _humanize_chunk_text
 
@@ -251,7 +251,7 @@ def build_command_router(
         if not integrity_ok:
             lines.append(f"• Проверка БД: <code>{html.escape(integrity_details[:80])}</code>")
         if recent_done_paths:
-            latest_note = html.escape(Path(recent_done_paths[0]).name)
+            latest_note = html.escape(humanize_note_label(Path(recent_done_paths[0]).name))
             lines.append(f"• Последняя заметка: <code>{latest_note}</code>")
 
         await message.answer(
@@ -310,7 +310,7 @@ def build_command_router(
             CARD_DIVIDER,
         ]
         for idx, item in enumerate(matches[:3], start=1):
-            safe_file = html.escape(item['file_name'])
+            safe_file = html.escape(item.get("display_name") or humanize_note_label(item["file_name"]))
             safe_snippet = html.escape(item['snippet'])
             lines.append(f"<b>{idx}.</b> <code>{safe_file}</code>")
             lines.append(f"💬 <i>{safe_snippet}</i>")
@@ -402,7 +402,7 @@ def build_command_router(
             return
         lines = ["🤖 <b>Сейчас покажу последние записи из базы.</b>", "", "📋 <b>Последние записи</b>", CARD_DIVIDER]
         for idx, item in enumerate(latest, start=1):
-            safe_file = html.escape(item['file_name'])
+            safe_file = html.escape(item.get("display_name") or humanize_note_label(item["file_name"]))
             safe_snippet = html.escape(item['snippet'])
             lines.append(f"<b>{idx}.</b> <code>{safe_file}</code>")
             lines.append(f"💬 <i>{safe_snippet}</i>")
@@ -668,36 +668,19 @@ def _status_label(status: str) -> str:
 
 
 def _display_note_name(file_name: str) -> str:
-    stem = Path(file_name).stem
-    parts = stem.split(" - ", 1)
-    if len(parts) == 2:
-        stem = parts[1]
-    if stem.endswith(")") and "(" in stem:
-        stem = stem.rsplit("(", 1)[0].rstrip()
-    cleaned = stem.strip()
-    if re.fullmatch(r"note(?:\s+\S+)?", cleaned, re.IGNORECASE):
-        return "Сохранённая заметка"
-    if cleaned.lower().startswith(("http ", "https ", "www ")):
-        compact = cleaned.replace("https ", "").replace("http ", "").replace("www ", "")
-        compact = compact.split()[0].strip("/:-")
-        if compact:
-            return f"Материал из {compact}"
-        return "Сохранённый материал"
-    return cleaned or "Сохранённая заметка"
+    return humanize_note_label(file_name)
 
 
 def _source_label(file_name: str, index: int) -> str:
-    base_name = Path(file_name).name or file_name
     display = _display_note_name(file_name).strip()
     generic = {
         "",
-        "Note",
         "Сохранённая заметка",
         "Сохранённый материал",
     }
-    if display in generic or display.lower().startswith("материал из "):
+    if display in generic:
         return f"Источник {index}"
-    return base_name
+    return display
 
 
 def _preview_text(text: str, max_chars: int = 180) -> str:
