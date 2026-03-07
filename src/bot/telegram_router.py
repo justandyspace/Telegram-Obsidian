@@ -126,6 +126,42 @@ def build_router(
             return
 
         raw_text = (message.text or message.caption or "").strip()
+        quick_action = _match_quick_action_alias(raw_text)
+        if quick_action == "add":
+            await message.answer(
+                "➕ <b>Добавить</b>\n\n"
+                "Просто отправь сюда:\n"
+                "• текст или идею\n"
+                "• ссылку\n"
+                "• голосовое\n"
+                "• фото или документ\n\n"
+                "Если нужно, можешь дописать теги вроде <code>#save</code> или <code>#summary</code>.",
+                parse_mode="HTML",
+                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+            )
+            return
+        if quick_action == "search":
+            await message.answer(
+                "🔎 <b>Поиск по базе</b>\n\n"
+                "Что можно сделать:\n"
+                "• <code>/find запрос</code> для быстрого поиска\n"
+                "• <code>/summary вопрос</code> для ответа по базе\n"
+                "• кнопка <b>📲 База</b> для полного поиска и просмотра заметок",
+                parse_mode="HTML",
+                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+            )
+            return
+        if quick_action == "manage":
+            await message.answer(
+                "⚙️ <b>Управление</b>\n\n"
+                "Здесь всё служебное:\n"
+                "• <code>/status</code> для состояния очереди и индекса\n"
+                "• <code>/delete имя_файла.md</code> для удаления одной заметки\n"
+                "• <code>/delete cancel</code> для отмены массового удаления",
+                parse_mode="HTML",
+                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+            )
+            return
         if not raw_text:
             await message.answer("Пришли текст, ссылку или заметку. Если хочешь, можешь добавить теги вроде <code>#save</code>.", parse_mode="HTML")
             return
@@ -351,6 +387,29 @@ def _display_note_name(file_name: str) -> str:
     if display == Path(file_name).name:
         display = Path(file_name).stem
     return display[:80]
+
+
+def _match_quick_action_alias(text: str) -> str:
+    normalized = (
+        str(text or "")
+        .replace("⚙️", "")
+        .replace("⚙", "")
+        .replace("🔎", "")
+        .replace("➕", "")
+        .replace("📊", "")
+        .replace("🕘", "")
+        .replace("🗑", "")
+        .replace("\uFE0F", "")
+        .strip()
+        .lower()
+    )
+    if normalized == "добавить":
+        return "add"
+    if normalized in {"найти", "поиск"}:
+        return "search"
+    if normalized in {"управление", "статус"}:
+        return "manage"
+    return ""
 
 
 def _humanize_note_destination(*, note_path: Path, base_vault_path: Path | None) -> tuple[str, str]:

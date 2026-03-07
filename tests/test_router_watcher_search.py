@@ -183,6 +183,21 @@ class TelegramRouterRuntimeTests(unittest.TestCase):
         asyncio.run(handlers["intake_handler"](duplicate))
         self.assertIn("Дубликат пропущен", duplicate.answers[0])
 
+    def test_text_intake_treats_button_aliases_as_ui_actions(self) -> None:
+        job_service = _FakeJobService([SimpleNamespace(is_new=True, job_id="job-1", actions={"save"})])
+        ai_service = _FakeAIService("ready")
+        handlers = _router_handlers(job_service, {1}, ai_service=ai_service)
+
+        search_alias = _FakeMessage(text=" Найти ")
+        asyncio.run(handlers["intake_handler"](search_alias))
+        self.assertIn("Поиск по базе", search_alias.answers[0])
+
+        add_alias = _FakeMessage(text="Добавить")
+        asyncio.run(handlers["intake_handler"](add_alias))
+        self.assertIn("Просто отправь сюда", add_alias.answers[0])
+
+        self.assertEqual(ai_service.calls, [])
+
     def test_router_keeps_only_ingest_specific_handlers(self) -> None:
         handlers = _router_handlers(_FakeJobService([]), {1}, store=MagicMock(), ai_service=_FakeAIService())
         self.assertIn("intake_handler", handlers)
