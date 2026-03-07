@@ -1,108 +1,101 @@
-# Пред-пентест аудит безопасности: telegram-obsidian-local
+# Pre-Pentest Security Audit: telegram-obsidian-local
 
-**Аудитор:** внешний / независимый  
-**Дата:** 2026-03-05  
-**Уровень строгости:** red-team ready  
-**Целевая кодовая база:** `c:\Users\Desktop\Desktop\telegram-obsidian-local`
+**Auditor:** external / independent  
+**Date:** 2026-03-05  
+**Assessment mode:** red-team ready  
+**Target codebase:** `C:\Users\Desktop\Desktop\telegram-obsidian-local`
 
 ---
 
 ## A. Executive Summary
 
-Бот принимает текст, медиа, ссылки и голосовые сообщения от авторизованных пользователей Telegram, обрабатывает их через AI-пайплайн (Gemini) и записывает заметки в Obsidian-хранилище через базы данных SQLite и CouchDB.
+The bot accepts text, media, links, and voice messages from authorized Telegram users, processes them through an AI pipeline, and writes notes into Obsidian-backed storage using SQLite and CouchDB.
 
-**Выявлено уязвимостей:**
+**Reported findings:**
 
-- Критических (P0): **4**
-- Высокого риска (P1): **5**
-- Среднего риска (P2): **4**
-- Низкого риска (P3): **2**
+- Critical (P0): **4**
+- High risk (P1): **5**
+- Medium risk (P2): **4**
+- Low risk (P3): **2**
 
-🚨 **Самая острая находка (Блокер №1):** Реальные секреты программиста/администратора (`TELEGRAM_TOKEN`, `GEMINI_API_KEY`, `CF_TUNNEL_TOKEN`, `TG_API_HASH`, `TG_API_ID`, `COUCHDB_PASSWORD`) зафиксированы в конфигурационном файле `.env` в открытом виде! Все токены, найденные в `.env`, должны считаться **скомпрометированными** и требуют немедленной замены (ротации).
+**Primary blocker:** real operator secrets were stored in plaintext inside `.env`, including `TELEGRAM_TOKEN`, `GEMINI_API_KEY`, `CF_TUNNEL_TOKEN`, `TG_API_HASH`, `TG_API_ID`, and `COUCHDB_PASSWORD`. Any token found in that file must be treated as compromised and rotated immediately.
 
-Среди других критических находок: классическая SQL-инъекция в миграциях базы данных (позволяет выполнять произвольный код), отсутствие ограничений на количество запросов (rate-limiting), что открывает путь к мощному отказу в обслуживании (burst DoS), а также уязвимость серверной подделки запросов (SSRF) через обход проверок DNS (DNS TOCTOU/rebinding).
+Additional high-severity concerns include SQL injection risk in migration helpers, missing rate limiting for expensive Telegram flows, SSRF exposure through DNS rebinding / TOCTOU behavior, and leakage of internal exception text to end users.
 
-**Вердикт: NO-GO** (Система абсолютно не готова к внешнему тестированию на проникновение до устранения уязвимостей уровня P0 и P1).
-
----
-
-## B. Findings Table (Таблица находок)
-
-| ID       | Уровень (Severity) | CWE / Валидация | Компонент                | Сценарий атаки (Exploit Scenario)                                                                                                          | Влияние (Impact)                                                                            | Подтверждение (Evidence)                                             | Рекомендации по исправлению                                                                                         |
-| :------- | :----------------: | :-------------: | :----------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------ | :------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
-| **F-01** | **P0** (Критичный) |     CWE-312     | `.env` / git             | Токены в `.env` зафиксированы plaintext. Если `.env` попал в git-историю — атакующий клонирует репо и получает полный доступ.              | Полный захват бота, утечка всех заметок, abuse Gemini API за чужой счёт.                    | `.env` строки 10-55; `COUCHDB_PASSWORD=admin` (стр. 47)              | Немедленная ротация всех секретов. Использовать `git filter-repo` для очистки истории. Использовать Docker Secrets. |
-| **F-02** | **P0** (Критичный) |     CWE-89      | `storage.py: 927,931`    | `_ensure_column` строит SQL-запросы через f-string (`ALTER TABLE {table_name}...`). При попадании пользовательского ввода — DDL-injection. | Уничтожение БД, corruption schema. Возможен RCE.                                            | `storage.py:927-931` (`f"PRAGMA..."`)                                | Строго жесткий белый список (whitelist) для имен таблиц и колонок. Не использовать форматирование строк в SQL.      |
-| **F-03** | **P0** (Критичный) |     CWE-400     | Все хендлеры Telegram    | Отсутствие rate-limiting. Злоумышленник (или ботнет) может вызвать флуд `/summary` или отправить 1000 длинных голосовых.                   | Финансовый ущерб от Gemini API overage, деградация (DoD) прода, зависание очереди.          | Отсутствие любых счетчиков лимитов в `src/bot/telegram_router.py`.   | Внедрить абстракцию Token Bucket: не более 10 сообщений/60s, не более 5 команд/60s.                                 |
-| **F-04** | **P0** (Критичный) |     CWE-918     | `url_safety.py`          | В `validate_public_http_url` DNS резолвится дважды (проверка IP -> сам запрос). DNS-rebinding (TTL=0) обходит проверку.                    | Server-Side Request Forgery на внутренние сервисы (CouchDB 5984, health checks).            | `url_safety.py:62-66` (проверка) vs `url_safety.py:134` (вызов req). | Разрешать IP во время первой проверки и использовать жестко заданный IP в `requests.Session`.                       |
-| **F-05** |  **P1** (Высокий)  |     CWE-200     | `ai_service.py` и роутер | `str(exc)` прицепляется прямиком к ответу Telegram-пользователю при любой ошибке AI.                                                       | Утечка внутренних путей (path leaks), фрагментов API-ключей и состояния сервера.            | `ai_service.py:60`                                                   | Возвращать пользователю только generic message («Внутренняя ошибка»). Исключения писать в лог.                      |
-| **F-06** |  **P1** (Высокий)  |     CWE-326     | `deploy/couchdb`         | CouchDB Basic Auth передается без TLS (plaintext). URL по умолчанию `http://couchdb:5984`.                                                 | MITM / Перехват учетных данных администратора БД в docker-сети.                             | `couchdb_bridge.py:11`, `note_writer.py:30`                          | Требовать TLS (`https://`) для общения с базой; хранить пароли вне кода.                                            |
-| **F-07** |  **P1** (Высокий)  |     CWE-284     | `commands.py`            | В `/delete all` фазы `consume` токена и `_delete_all_notes` **не атомарны**. Race condition (состояние гонки).                             | Потеря данных: частичное удаление или удаление только что созданных заметок (между фазами). | `commands.py:413-437`                                                | Обернуть обе операции в единый transaction scope / lock.                                                            |
-| **F-08** |  **P1** (Высокий)  |     CWE-22      | `commands.py`            | `_is_within(note_path, vault)` проверяет пути файлов, но уязвима для Symbolic Link Traversal.                                              | Удаление любых произвольных файлов на сервере вне vault.                                    | `commands.py:66-68`, `460-461`                                       | Использовать проверку `path.is_symlink()`, применять `os.path.realpath()`.                                          |
-| **F-09** |  **P2** (Средний)  |     CWE-693     | `local.ini`              | Конфиг CouchDB: включен CORS (`credentials=true`), разрешены методы записи `PUT, POST, DELETE`.                                            | CSRF-атаки, если пользователь с активным туннелем перейдёт на вредоносный сайт.             | `local.ini:4-8`                                                      | Ограничить CORS только для методов `GET`, убрать `credentials=true` для write.                                      |
-| **F-10** |  **P2** (Средний)  |     CWE-116     | `telegram_router.py`     | Конкатенация пути файла из Telegram в URL без должной санитизации символов `../`.                                                          | Ограниченный риск Path Traversal, если TG API скомпрометировано.                            | `telegram_router.py:170`                                             | Валидировать возвращаемые файлы регулярным выражением (`^[a-zA-Z0-9/_\-.]+$`).                                      |
-| **F-11** |  **P2** (Средний)  |     CWE-400     | `enrichment.py`          | Нет жесткого кап-размера для переменной `base_text`. Возможно отправить более 14,000 символов в Gemini API.                                | Ограниченный DoS / Финансовый abuse Gemini.                                                 | `enrichment.py:65`                                                   | Обрезать текст: `base_text[:8000]`.                                                                                 |
-| **F-12** |  **P2** (Средний)  |     CWE-693     | `Dockerfile` и `*.yml`   | Зависимости в `requirements.txt` без проверки хэшей; используется `cloudflared:latest`.                                                    | Отравление цепочки поставок (Supply Chain Attack).                                          | `Dockerfile`, `docker-compose.yml:92`                                | Использовать `pip install --require-hashes`; применять `@sha256` digest для образов.                                |
-| **F-13** |  **P2** (Средний)  |     CWE-778     | `logging.py`             | Деструктивные операции (удаление БД, ретрай очереди) не формируют структурированных логов.                                                 | Невозможность проведения форензики инцидента.                                               | Везде                                                                | Внедрить audit trail (структурированные логи с ID, IP и хешом запроса).                                             |
-| **F-14** |  **P3** (Низкий)   |     CWE-311     | `storage.py`             | База SQLite работает в режиме `synchronous=NORMAL` с WAL.                                                                                  | Риск потери последних транзакций при отказе питания/падении докера.                         | `storage.py:903`                                                     | Перевести на `synchronous=FULL`, проводить `PRAGMA integrity_check` на старте.                                      |
-| **F-15** |  **P3** (Низкий)   |     CWE-400     | `telegram_router.py`     | Poller ждет аудио с `timeout=180`с и делает запрос к TG каждые `2.0`с (до 90 API calls на 1 аудио).                                        | Блокировка от Telegram API за флуд.                                                         | `telegram_router.py:213`                                             | Внедрить Exponential Backoff.                                                                                       |
+**Verdict:** `NO-GO` for external pentesting until all P0 and P1 issues are resolved.
 
 ---
 
-## C. Top 10 Must-Fix Before Pentest (Чеклист к исправлению)
+## B. Findings Table
 
-✅ **Блокирующие баги (Должны быть закрыты обязательно):**
-
-- [ ] **1. [Безопасность]** Ротировать **ВСЕ** скомпрометированные секреты (`.env`). Удалить `.env` из системы контроля версий. Пройтись `git filter-repo`, если файл попадал в коммиты.
-- [ ] **2. [DoS]** Реализовать in-memory per-user rate limit для обработки входящих сообщений (Intake Router) и тяжелых команд (`/summary`, `/find`).
-- [ ] **3. [SSRF]** Устранить обход проверки DNS (Time-Of-Check to Time-Of-Use) в файле `url_safety.py`. Зафиксировать разрешенный IP-адрес для `requests`.
-- [ ] **4. [Info Leak]** Убрать отправку системных exception messages (tracebacks, internal paths) конечным пользователям в Telegram (файл `ai_service.py`).
-- [ ] **5. [Взлом ФС]** Внедрить строгие проверки на символические ссылки `os.path.islink()` перед любым вызовом удаления `unlink()`.
-
-⚙️ **Технический долг / Желательные фиксы:**
-
-- [ ] **6. [Уязвимость миграций]** Ввести жесткий `whitelist` на уровне кода для имен колонок/таблиц в `_ensure_column` при применении DDL (SQL) скриптов.
-- [ ] **7. [CORS]** Пересмотреть конфигурацию `couchdb` CORS (исключить выдачу credentials для небезопасных методов записи в БД).
-- [ ] **8. [Финансовая уязвимость]** Обрезать любой промпт для LLM (Gemini) до строго заданного числа токенов или байт (напр., `[:8000]`).
-- [ ] **9. [Инфраструктура]** Закрепить docker-образы (`cloudflared`) за их SHA256 sum.
-- [ ] **10. [Логирование]** Развернуть полномасштабный лог-трейл (audit logs) для любых `DELETE` манипуляций.
-
----
-
-## D. Telegram Commands Risk Matrix (Матрица рисков команд)
-
-| Команда              | Вектор атаки (Abuse Vector)                                                                       | Текущий Риск | Необходимые меры защиты                                                                              |
-| :------------------- | :------------------------------------------------------------------------------------------------ | :----------: | :--------------------------------------------------------------------------------------------------- |
-| `/start`             | Раскрытие информации о боте (Reconnaissance).                                                     |    🟢 LOW    | Уже защищён allowlist (белым списком пользователей).                                                 |
-| `/status`            | Раскрытие текстов ошибок, внутренних путей, аптайма.                                              |  🟡 MEDIUM   | Обрезать текст ошибок до 50 символов; не показывать `integrity_details` конечным пользователям.      |
-| `/find <query>`      | Отказ в обслуживании (DoS) БД RAG; Инъекция через поиск.                                          |   🔴 HIGH    | Ввести Rate limit (до 5 запросов/мин). Ограничить запрос до 200 символов. Убрать `score` из ответа.  |
-| `/summary <query>`   | LLM abuse (генерация мусора); Prompt injection.                                                   |   🔴 HIGH    | Rate limit (до 3 запросов/мин). Ограничить длину 300 символами. Санитизировать инпут.                |
-| `/job <id>`          | Перебор (enumeration) ID задач. В случае Single-Tenant раскрывает чужие задачи (если ID угаданы). |  🟡 MEDIUM   | Убрать вывод `note_path` из ответа пользователю. Увеличить минимальную длину фильтра до 10 символов. |
-| `/retry <id>`        | Шторм перезапусков (retry storm) на зависших задачах.                                             |  🟡 MEDIUM   | Ввести Rate limit (5 перезапусков/мин). Максимально допустимое кол-во попыток (hard cap).            |
-| `/delete <id\|file>` | Удаление произвольного локального файла через Symbol Links (Path Traversal).                      |   🔴 HIGH    | Внедрить обязательную проверку пути файлов + аудит-логи.                                             |
-| `/delete all`        | Полное уничтожение данных. Утечка токена удаления в окно чата (Social eng/Shoulder surfing).      |  🟡 MEDIUM   | Сократить Time-To-Live токена с 2 мин до 1 мин. Увеличить длину токена (от 12+ chars).               |
-| `/delete confirm`    | Timing-aware атаки на сравнение строк токенов.                                                    |    🟢 LOW    | Использовать константно-временное сравнение (`hmac.compare_digest`).                                 |
-| `text/media intake`  | Отправка 30MB+ файлов бесконечным потоком приведет к отказу диска, RAM или Database bloat.        |   🔴 HIGH    | Ввести глобальный Queue Throttling (не более 2 активных Voice Jobs на пользователя).                 |
+| ID | Severity | CWE | Component | Summary | Impact | Recommended Fix |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-01 | P0 | CWE-312 | `.env` / git history | Secrets stored in plaintext and potentially committed | Full bot compromise, data leakage, third-party API abuse | Rotate all secrets, remove from history, move to a secrets manager |
+| F-02 | P0 | CWE-89 | `storage.py` migration helper | Dynamic SQL built with interpolated identifiers | Schema destruction, arbitrary DB modification | Enforce a hardcoded whitelist for table and column names |
+| F-03 | P0 | CWE-400 | Telegram handlers | No per-user or per-command rate limiting | Cost abuse, queue starvation, denial of service | Add token-bucket limits for intake and heavy commands |
+| F-04 | P0 | CWE-918 | `url_safety.py` | URL validation and request execution can resolve DNS at different moments | SSRF against internal services | Lock requests to the validated IP and harden resolver behavior |
+| F-05 | P1 | CWE-200 | `ai_service.py` and router | Raw exception strings may be returned to users | Internal path and system state leakage | Return generic user-safe errors and log internals only |
+| F-06 | P1 | CWE-326 | CouchDB deployment | Basic auth over non-TLS transport | Credential interception in transit | Require TLS for DB traffic |
+| F-07 | P1 | CWE-284 | `commands.py` delete-all flow | Token consume and deletion are not atomic | Partial or unintended deletion under race | Use one transaction / lock scope |
+| F-08 | P1 | CWE-22 | `commands.py` path validation | Symbolic-link traversal risk during delete | Arbitrary file deletion outside the vault | Check symlinks and validate resolved paths strictly |
+| F-09 | P2 | CWE-693 | CouchDB config | Broad CORS write permissions | CSRF exposure | Restrict methods and disable credentialed write CORS |
+| F-10 | P2 | CWE-116 | `telegram_router.py` | Telegram file path interpolation lacks strict sanitization | Limited traversal-style risk | Validate allowed path characters explicitly |
+| F-11 | P2 | CWE-400 | `enrichment.py` | No strict cap on large prompt payloads | Cost abuse and degraded performance | Truncate large prompt bodies deterministically |
+| F-12 | P2 | CWE-693 | Docker / dependencies | Floating images and unhashed installs | Supply-chain risk | Pin digests and require dependency hashes |
+| F-13 | P2 | CWE-778 | logging | Missing audit trail for destructive actions | Weak incident forensics | Add structured audit logs |
+| F-14 | P3 | CWE-311 | SQLite durability mode | `synchronous=NORMAL` may lose recent writes on crash | Limited data loss window | Consider `synchronous=FULL` where appropriate |
+| F-15 | P3 | CWE-400 | Telegram polling behavior | Long polling loops around media retrieval can be noisy | Telegram API throttling risk | Add exponential backoff |
 
 ---
 
-## E. GO/NO-GO for External Pentest
+## C. Top 10 Must-Fix Before Pentest
 
-### Блокеры: ❌ **VERDICT: NO-GO**
+- Rotate all compromised secrets and remove `.env` from version control history.
+- Add per-user rate limits for intake, `/summary`, and `/find`.
+- Fix DNS rebinding / TOCTOU exposure in URL fetch validation.
+- Stop returning raw exception text to Telegram users.
+- Harden delete flows against symlink traversal.
+- Add strict identifier whitelists for migration-time SQL helpers.
+- Tighten CouchDB CORS policy.
+- Limit LLM prompt size deterministically.
+- Pin infrastructure images and dependency integrity.
+- Add structured audit logging for delete and retry operations.
 
-_Приложение не допускается до внешнего пентест-аудита (Слишком уязвимо)._
+---
 
-**Минимальные критерии перехода состояния к "GO":**
+## D. Telegram Command Risk Matrix
 
-1. **Все секреты ротированы** (Старые ключи и пароли из `.env` инвалидированы внутри соответствующих сервисов Telegram/Google/CouchDB).
-2. **Абсолютно удалены следы из Git** (`git filter-repo`, если `.env` коммитился).
-3. **Реализованы Rate-Limit механизмы** на функции загрузки данных, `/summary`, `/find`.
-4. **Устранены Server-Side Request Forgery уязвимости** (Исправлен DNS TOCTOU).
-5. **Все "сырые" (raw) ошибки кода скрыты от пользователя.**
-6. **Настроена безопасная тестовая среда с тестовыми ключами.**
+| Command | Main Abuse Vector | Current Risk | Required Protection |
+| --- | --- | --- | --- |
+| `/start` | Recon / feature discovery | Low | Allowlist enforcement |
+| `/status` | Operational detail leakage | Medium | Redact internals and limit user-facing diagnostics |
+| `/find <query>` | DoS against search and index | High | Rate limiting and query length caps |
+| `/summary <query>` | LLM abuse, prompt injection, cost spikes | High | Strict limits, sanitization, quotas |
+| `/job <id>` | Enumeration of job identifiers | Medium | Reduce exposure of note paths and internals |
+| `/retry <id>` | Retry storm on unstable jobs | Medium | Retry caps and throttling |
+| `/delete <id|file>` | Unsafe file deletion | High | Strict path validation and audit logs |
+| `/delete all` | Total data wipe | Medium | Strong confirmation flow and shorter TTL |
+| `/delete confirm` | Token replay / timing edge cases | Low | Constant-time compare and one-time token semantics |
+| Intake flows | Large-file floods | High | Queue throttling and payload limits |
 
-### Точечные вопросы команде (Аудиторские предположения)
+---
 
-- **Проверка истории Git:** Точно ли конфигурационный файл `.env` никогда не участвовал в коммитах?
-- **Доступность из Web:** CouchDB на 5984 и WebHook пробрасываются в публичную Сеть напрямую без Reverse-Proxy с настроенным WAF (Web Application Firewall)? Если да — это потенциально опасно.
-- **Использование API:** Зачем боту переменные окружения `TG_API_ID` и `TG_API_HASH`? В кодовой базе они не задействованы, но для работы с Telegram User API (Telethon / Pyrogram) крайне критичны — их утечка опаснее Bot API Token. Вы используете их в другом месте?
-- **Изолированность:** Будет ли тестироваться **Multi-tenant** конфигурация? При `TENANT_MODE=multi` появляются дополнительные векторы атак на нарушение изоляции.
+## E. GO / NO-GO for External Pentest
+
+### Verdict: `NO-GO`
+
+Minimum conditions to move to `GO`:
+
+1. All leaked secrets rotated and invalidated.
+2. Git history scrubbed if secrets were committed.
+3. Rate limiting implemented for intake and expensive commands.
+4. SSRF protections fixed, including DNS TOCTOU handling.
+5. Raw internal errors no longer exposed to users.
+6. A safe staging environment exists with test credentials only.
+
+### Open Auditor Questions
+
+- Was `.env` ever committed to git history?
+- Are CouchDB and webhook endpoints exposed publicly without a hardened reverse proxy?
+- Why are `TG_API_ID` and `TG_API_HASH` present if the codebase does not use them directly?
+- Will the multi-tenant configuration be part of the security test scope?

@@ -1,10 +1,17 @@
 # VaultPulse OSS
 
-[![Release](https://img.shields.io/github/v/release/justandyspace/VaultPulse-OSS?label=release)](https://github.com/justandyspace/VaultPulse-OSS/releases)
-[![License](https://img.shields.io/github/license/justandyspace/VaultPulse-OSS)](https://github.com/justandyspace/VaultPulse-OSS/blob/main/LICENSE.md)
-[![CI](https://img.shields.io/github/actions/workflow/status/justandyspace/VaultPulse-OSS/ci.yml?branch=main&label=CI)](https://github.com/justandyspace/VaultPulse-OSS/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/justandyspace/telegram-obsidian?label=release)](https://github.com/justandyspace/telegram-obsidian/releases)
+[![License](https://img.shields.io/github/license/justandyspace/telegram-obsidian)](https://github.com/justandyspace/telegram-obsidian/blob/main/LICENSE.md)
 [![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+
+<p align="left">
+  <a href="https://github.com/justandyspace">
+    <img src="https://github.com/justandyspace.png?size=72" alt="justandyspace avatar" width="72" height="72">
+  </a>
+</p>
+
+**Author:** [justandyspace](https://github.com/justandyspace)
 
 Turn Telegram into a structured capture layer for Obsidian.
 
@@ -35,38 +42,38 @@ It is built for self-hosted use. Your data stays local, Docker support is includ
 
 ## Key Features
 
-- Строгая авторизация по allowlist (`TELEGRAM_ALLOWED_USER_ID(S)`).
-- Поддержка режимов Telegram: `polling`, `webhook`, `auto`.
-- Tenant-изоляция хранилищ (`VAULT_PATH`, `INDEX_DIR`, SQLite state).
-- Идемпотентная очередь задач и ретраи с exponential backoff.
-- Автовосстановление stuck jobs.
-- Безопасный URL ingest с SSRF-защитой.
-- RAG: semantic find + grounded summary (`/find`, `/summary`).
-- Встроенные health endpoints для bot/worker.
+- Strict allowlist-based authorization (`TELEGRAM_ALLOWED_USER_ID(S)`).
+- Support for Telegram modes: `polling`, `webhook`, `auto`.
+- Tenant-isolated storage (`VAULT_PATH`, `INDEX_DIR`, SQLite state).
+- Idempotent job queue with retries and exponential backoff.
+- Automatic recovery for stuck jobs.
+- Safe URL ingestion with SSRF protection.
+- RAG support: semantic search + grounded summaries (`/find`, `/summary`).
+- Built-in health endpoints for bot and worker.
 
-## Технологии
+## Technology Stack
 
 - Python 3.12+
 - aiogram 3
 - aiohttp
 - BeautifulSoup / pypdf / youtube-transcript-api
-- Gemini API (опционально, для embedding/generation)
+- Gemini API (optional, for embeddings and generation)
 - SQLite
 - Docker Compose
 
-## Структура проекта
+## Project Structure
 
-- `src/main.py` — entrypoint ролей `bot`, `worker`, `watcher`.
-- `src/bot` — роутинг Telegram и команды.
-- `src/pipeline` — нормализация, действия, очередь.
-- `src/parsers` — парсинг URL и guarded fetch.
-- `src/obsidian` — маршрутизация и запись заметок.
-- `src/rag` — индексация, retrieval и ответы.
-- `src/infra` — конфиг, логирование, health, storage.
-- `tests` — автотесты.
-- `deploy` — deployment artifacts (включая systemd unit-файлы).
+- `src/main.py` - entrypoint for the `bot`, `worker`, and `watcher` roles.
+- `src/bot` - Telegram routing and commands.
+- `src/pipeline` - normalization, actions, and queue handling.
+- `src/parsers` - URL parsing and guarded fetch logic.
+- `src/obsidian` - note routing and writing.
+- `src/rag` - indexing, retrieval, and answers.
+- `src/infra` - config, logging, health, and storage.
+- `tests` - automated tests.
+- `deploy` - deployment artifacts, including systemd unit files.
 
-## Быстрый старт
+## Quick Start
 
 ```bash
 python -m venv .venv
@@ -93,7 +100,7 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-Запуск ролей в отдельных терминалах:
+Run the roles in separate terminals:
 
 ```bash
 python -m src.main --role bot
@@ -101,7 +108,7 @@ python -m src.main --role worker
 python -m src.main --role watcher
 ```
 
-## Быстрый старт (Docker Compose)
+## Quick Start (Docker Compose)
 
 ```bash
 docker compose up -d --build bot worker
@@ -114,48 +121,48 @@ Health endpoints:
 - Bot: `127.0.0.1:8080/health`
 - Worker: `127.0.0.1:8081/health`
 
-## Обязательные переменные окружения
+## Required Environment Variables
 
-Минимальный набор в `.env`:
+Minimum `.env` configuration:
 
 - `TELEGRAM_TOKEN`
-- `TELEGRAM_ALLOWED_USER_ID` или `TELEGRAM_ALLOWED_USER_IDS`
-- `TENANT_MODE` (`single` или `multi`)
+- `TELEGRAM_ALLOWED_USER_ID` or `TELEGRAM_ALLOWED_USER_IDS`
+- `TENANT_MODE` (`single` or `multi`)
 - `VAULT_PATH`, `STATE_DIR`, `CACHE_DIR`, `INDEX_DIR`
 - `APP_ROLE` (`bot`, `worker`, `watcher`, `standalone`)
 
-Опционально для RAG-качества:
+Optional for better RAG quality:
 
 - `GEMINI_API_KEY`
 - `GEMINI_EMBED_MODEL`
 - `GEMINI_GENERATION_MODEL`
 - `GDRIVE_ENABLED`, `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN`, `GDRIVE_ROOT_FOLDER_ID`
 
-Для webhook режима:
+For webhook mode:
 
 - `WEBHOOK_BASE_URL`
-- `WEBHOOK_SECRET_TOKEN` (длинный случайный секрет)
+- `WEBHOOK_SECRET_TOKEN` (a long random secret)
 
-Для Mini App deep-link'ов из бота:
+For Mini App deep links from the bot:
 
 - `MINI_APP_BASE_URL`
 
-Для watcher fallback-поллинга:
+For watcher fallback polling:
 
-- `WATCHER_POLL_SECONDS` (интервал polling, если watchdog недоступен)
+- `WATCHER_POLL_SECONDS` (polling interval if watchdog is unavailable)
 
-## Команды Telegram
+## Telegram Commands
 
-- `/start` — справка и список возможностей.
-- `/status` — состояние очереди, ошибки, статистика RAG и storage.
-- `/find <query>` — semantic/keyword поиск по заметкам.
-- `/summary <question>` — grounded summary по индексу.
-- `/retry <job_id_or_prefix>` — ручной ретрай задачи.
-- `/delete <note_id|job_id_prefix|file_name>` — удалить заметку (файл + индекс + DB-запись).
+- `/start` - help and feature overview.
+- `/status` - queue state, errors, and RAG/storage stats.
+- `/find <query>` - semantic/keyword note search.
+- `/summary <question>` - grounded summary over the index.
+- `/retry <job_id_or_prefix>` - manually retry a job.
+- `/delete <note_id|job_id_prefix|file_name>` - delete a note (file + index + DB record).
 
-Если задан `MINI_APP_BASE_URL`, бот будет добавлять WebApp CTA-кнопки в `/start`, `/status`, `/find` и `/summary`.
+If `MINI_APP_BASE_URL` is set, the bot adds WebApp CTA buttons to `/start`, `/status`, `/find`, and `/summary`.
 
-Сообщения можно отправлять с тегами действий:
+Messages can include action tags:
 
 - `#save`
 - `#summary`
@@ -163,7 +170,7 @@ Health endpoints:
 - `#resummarize`
 - `#translate`
 
-## Качество и проверки
+## Quality and Verification
 
 ```bash
 ruff check src tests
@@ -175,22 +182,22 @@ pytest -q
 
 CI: `.github/workflows/ci.yml`
 
-## Безопасность и надежность
+## Security and Reliability
 
-- Блокировка неавторизованных пользователей Telegram.
-- SSRF guard: только `http/https`, запрет private/internal ranges, валидация редиректов.
-- Идемпотентность задач по ключу + tenant scope.
-- Периодический recovery зависших задач.
-- Проверка целостности SQLite и миграции схемы.
+- Blocking for unauthorized Telegram users.
+- SSRF guard: `http/https` only, private/internal range blocking, redirect validation.
+- Job idempotency by key plus tenant scope.
+- Periodic recovery for stuck jobs.
+- SQLite integrity checks and schema migrations.
 
-## Эксплуатация
+## Operations
 
 - [RUNBOOK.md](RUNBOOK.md)
 - [INCIDENT_PLAYBOOK.md](INCIDENT_PLAYBOOK.md)
 - [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
 - [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
-### Weekly health-check (рекомендуется раз в неделю)
+### Weekly Health Check (Recommended Once Per Week)
 
 ```powershell
 python scripts/weekly_healthcheck.py `
@@ -199,23 +206,23 @@ python scripts/weekly_healthcheck.py `
   --obsidian-dir "C:\path\to\your\Obsidian Vault\.obsidian"
 ```
 
-## Troubleshooting: заметка не появилась в Obsidian
+## Troubleshooting: A Note Did Not Appear in Obsidian
 
-1. Убедитесь, что запущены оба процесса: `bot` и `worker`.
-2. Проверьте `/status`:
-   - `Queue` не должна застревать в `pending/retry/failed`.
-   - `vault_path` должен указывать на ваш реальный Obsidian vault.
-   - `recent_note_paths` должен показывать пути недавно сохранённых заметок.
-3. Если `TENANT_MODE=multi`, заметки пишутся в подпапку `VAULT_PATH/<tenant_id>` (например, `tg_123456789`).
+1. Make sure both processes are running: `bot` and `worker`.
+2. Check `/status`:
+   - `Queue` should not remain stuck in `pending/retry/failed`.
+   - `vault_path` should point to your real Obsidian vault.
+   - `recent_note_paths` should show paths for recently saved notes.
+3. If `TENANT_MODE=multi`, notes are written into the `VAULT_PATH/<tenant_id>` subfolder, for example `tg_123456789`.
 
 ## Google Drive
 
-Если `GDRIVE_ENABLED=true`, worker включает три фоновых сценария:
+If `GDRIVE_ENABLED=true`, the worker enables three background flows:
 
-1. Telegram media выгружается в Google Drive до записи заметки, а в `BOT_LINKS` добавляется прямой Drive URL.
-2. Все markdown-заметки зеркалятся в папку `vault_mirror/` каждые 30 минут.
-3. `bot_state.sqlite3` ежедневно снапшотится в `db_snapshots/`.
+1. Telegram media is uploaded to Google Drive before note writing, and a direct Drive URL is added to `BOT_LINKS`.
+2. All Markdown notes are mirrored into `vault_mirror/` every 30 minutes.
+3. `bot_state.sqlite3` is snapshotted daily into `db_snapshots/`.
 
-## Лицензия
+## License
 
-См. [LICENSE.md](LICENSE.md).
+See [LICENSE.md](LICENSE.md).

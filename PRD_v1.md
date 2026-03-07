@@ -2,19 +2,19 @@
 
 ## 1. Product Frame
 
-Продукт не должен "переехать из бота в Mini App".
+The product should not "move from the bot into the Mini App."
 
-Правильная модель:
+The correct model is:
 
-- `Telegram Bot` = быстрый вход, уведомления, короткие команды
-- `Mini App` = просмотр, поиск, разбор, управление
+- `Telegram Bot` = fast input, notifications, short commands
+- `Mini App` = viewing, search, triage, management
 
-Главный value loop:
+Main value loop:
 
-1. Пользователь быстро сохраняет ссылку, текст или файл в бота.
-2. Система надежно обрабатывает это в фоне.
-3. Пользователь потом быстро находит, читает или суммаризирует это через bot preview или Mini App.
-4. Ошибки и destructive-сценарии прозрачны и безопасны.
+1. The user quickly saves a link, text snippet, or file into the bot.
+2. The system processes it reliably in the background.
+3. The user later finds, reads, or summarizes it via bot preview or the Mini App.
+4. Errors and destructive actions remain transparent and safe.
 
 ## 2. Goals (90 Days)
 
@@ -25,38 +25,38 @@
 ### Goal 2: Improve retrieval success
 
 - KPI: `query_success_rate > 60%`
-- Определение: пользователь получил результат и открыл заметку или источник
+- Definition: the user gets a result and opens a note or source
 
-### Goal 3: Make Mini App a real work surface
+### Goal 3: Make the Mini App a real work surface
 
-- KPI: `30%+` активных пользователей открывают Mini App хотя бы раз за 7 дней
-- Условие: open считается только если внутри было хотя бы 1 действие
+- KPI: `30%+` of active users open the Mini App at least once in 7 days
+- Condition: an open counts only if at least one action happens inside the app
 
 ### Goal 4: Reduce fear around failures and deletion
 
 - KPI: `failed_job_resolution_p50 < 2 min`
-- KPI: `delete_regret_rate` под контролем
+- KPI: keep `delete_regret_rate` under control
 
 ## 3. ICP
 
-Фокус на первые 90 дней:
+Focus for the first 90 days:
 
 - `Solo founder / knowledge worker`
 - `Research-heavy user`
 
-Не фокусироваться в v1:
+Not in scope for v1 focus:
 
-- на геймификации для hoarders
-- на массовом content management
-- на social/share сценариях
+- gamification for hoarders
+- large-scale content management
+- social or share-first flows
 
 ## 4. Core JTBD
 
-1. Быстро сохранить мысль, ссылку или файл без трения.
-2. Найти нужную заметку по смыслу за 5-10 секунд.
-3. Получить короткий grounded answer по своим заметкам.
-4. Понять, что сломалось в обработке, и быстро исправить.
-5. Безопасно удалить и иметь путь к восстановлению.
+1. Save a thought, link, or file quickly with minimal friction.
+2. Find the right note by meaning within 5-10 seconds.
+3. Get a short grounded answer from personal notes.
+4. Understand what failed in processing and fix it fast.
+5. Delete safely and still have a recovery path.
 
 ## 5. Routing Rules
 
@@ -65,8 +65,8 @@
 - capture
 - `/start`
 - `/status`
-- `/find` как quick preview
-- `/summary` как short answer
+- `/find` as a quick preview
+- `/summary` as a short answer
 - single retry
 - small delete
 
@@ -77,7 +77,7 @@
 - jobs triage
 - bulk delete and restore
 - settings
-- длинные multi-step сценарии
+- long multi-step workflows
 
 ### Routing Principle
 
@@ -90,29 +90,29 @@
 
 #### 1. Bot v2
 
-- компактный `/start`
-- тихое подтверждение intake
-- компактный `/status`
-- `/find` возвращает top results + CTA в app
-- `/summary` возвращает короткий grounded answer + sources + CTA
-- понятные error/retry ответы
-- deep-link в конкретный экран Mini App
+- compact `/start`
+- quiet intake confirmation
+- compact `/status`
+- `/find` returns top results + CTA into the app
+- `/summary` returns a short grounded answer + sources + CTA
+- clear error and retry responses
+- deep-link into a specific Mini App screen
 
 #### 2. Mini App v1
 
 - `Search`
 - `Note Detail`
 - `Jobs`
-- `Delete/Restore`
-- без KPI-wall
-- без перегруженного dashboard
+- `Delete / Restore`
+- no KPI wall
+- no overloaded dashboard
 
 #### 3. Trust Layer
 
 - safe delete / soft delete
 - undo / restore
-- quality guardrails для summary/search
-- понятная taxonomy ошибок
+- quality guardrails for summary and search
+- clear error taxonomy
 - tenant-safe routing
 
 ### P1
@@ -126,7 +126,7 @@
 - tinder review
 - topic clusters
 - note health score
-- "did you know" insights
+- “did you know” insights
 - shareable digest
 - complex graph features
 
@@ -134,13 +134,13 @@
 
 ### `/start`
 
-- короткий старт
-- CTA: сохранить первую заметку
-- CTA: открыть app, но не как главный шаг до first value
+- short introduction
+- CTA to save the first note
+- CTA to open the app, but not as the main path before first value
 
 ### `/status`
 
-Показывает только essentials:
+Show essentials only:
 
 - queue state
 - failed jobs count
@@ -149,26 +149,26 @@
 
 ### `/find <query>`
 
-- top-3 результата
-- короткий snippet
+- top 3 results
+- short snippet
 - primary CTA: `Open advanced search`
 
 ### `/summary <query>`
 
-- короткий grounded answer
-- обязательные источники
-- честный отказ, если контекста недостаточно
-- длинные и тяжелые запросы режутся guard'ами
+- short grounded answer
+- mandatory sources
+- honest refusal when context is insufficient
+- heavy / long queries constrained by guards
 
 ### `/retry <id>`
 
 - single-job recovery
-- если проблема сложная, CTA в `Jobs`
+- if the issue is complex, add a CTA into `Jobs`
 
 ### `/delete`
 
-- small delete допустим в боте
-- bulk delete только через Mini App
+- small delete is allowed in the bot
+- bulk delete belongs to the Mini App only
 
 ## 8. Mini App IA v1
 
@@ -184,7 +184,7 @@
 - continue where left off
 - failed jobs badge
 - quick actions
-- без KPI-перегруза
+- no KPI overload
 
 ### `Search`
 
@@ -195,21 +195,21 @@
 
 ### `Note Detail`
 
-- title/meta
+- title / meta
 - summary
-- source/original
-- related notes только если это дешево и качественно
+- source / original
+- related notes only if cheap and high quality
 
 ### `Activity`
 
 - jobs
 - retry history
-- delete/restore history
+- delete / restore history
 
 ### `Settings`
 
-- не отдельный bottom tab
-- drawer или sheet
+- not a separate bottom tab
+- drawer or sheet
 
 ## 9. Analytics
 
@@ -217,10 +217,10 @@
 
 `Weekly Successful Knowledge Tasks`
 
-Определение:
+Definition:
 
-- уникальный пользователь за 7 дней сделал `capture`
-- затем `successful retrieval` или `accepted summary`
+- a unique user completes `capture`
+- then completes `successful retrieval` or `accepted summary`
 
 ### Key Metrics
 
@@ -251,30 +251,30 @@
 
 ### Bot
 
-- команды не превращаются в длинные простыни
-- любой длинный ответ имеет app CTA
-- `/find` и `/summary` не ломают chat UX
-- все ошибки user-readable
+- commands do not turn into long message walls
+- every long answer includes an app CTA
+- `/find` and `/summary` do not break chat UX
+- all errors are user-readable
 
 ### Mini App
 
-- Search открывается с prefilled context из бота
-- Note Detail открывается по deep-link без потери контекста
-- Jobs показывает actionable status, а не raw internals
-- delete/restore работает атомарно
+- Search opens with prefilled context from the bot
+- Note Detail opens via deep link without losing context
+- Jobs shows actionable status instead of raw internals
+- delete / restore is atomic
 
 ### Quality
 
-- summary без sources не показывается как уверенный ответ
-- query latency остается в разумном пределе
+- a summary without sources is never shown as a confident answer
+- query latency stays within a reasonable budget
 - tenant leakage = 0
-- destructive actions audit-логируются
+- destructive actions are audit-logged
 
 ## 11. Roadmap
 
 ### Week 1
 
-- deep-link infra
+- deep-link infrastructure
 - `/start` v2
 - `/status` v2
 - telemetry skeleton
@@ -282,7 +282,7 @@
 
 ### Weeks 2-4
 
-- Mini App: Search, Note Detail, Activity/Jobs basic
+- Mini App: Search, Note Detail, Activity / Jobs basic
 - `/find` hybrid flow
 - `/summary` hybrid flow
 - safe delete basic
@@ -293,29 +293,29 @@
 - recovery UX hardening
 - saved views lite
 - weekly review lite
-- ranking/search improvements
+- ranking / search improvements
 
 ### Weeks 9-12
 
 - onboarding experiments
-- migration optimization bot -> app
+- migration optimization from bot to app
 - first monetization hypothesis test
 
-## 12. What To Cut Now
+## 12. What to Cut Now
 
-До отдельного решения не брать:
+Do not include these without a separate decision:
 
 - clusters
 - swipe review
 - note health
 - insight cards
 - heavy dashboard metrics
-- export/share flows
+- export / share flows
 
 ## 13. Final Product Thesis
 
-Самая сильная версия продукта на текущем этапе:
+The strongest current product version is:
 
-- не "умный бот"
-- не "еще один second-brain app"
-- а `reliable capture + fast retrieval + safe operations`
+- not “a smart bot”
+- not “another second-brain app”
+- but `reliable capture + fast retrieval + safe operations`
