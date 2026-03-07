@@ -1,10 +1,10 @@
-# telegram-obsidian-local
+# VaultPulse v0.1
 
-Production-first Telegram bot для сохранения контента в Obsidian с очередью задач, tenant-изоляцией и RAG-поиском/саммари.
+Telegram bot для быстрого сохранения текста, ссылок и медиа из Telegram в Obsidian.
 
 ## Почему этот проект
 
-`telegram-obsidian-local` принимает сообщения и ссылки из Telegram, безопасно обрабатывает контент и сохраняет заметки в Obsidian-совместимую структуру. Проект рассчитан на стабильную работу в self-hosted окружении: с health-check'ами, ретраями, восстановлением зависших задач и операционными runbook'ами.
+`VaultPulse` принимает сообщения и ссылки из Telegram, безопасно обрабатывает контент и сохраняет заметки в Obsidian-совместимую структуру. Проект рассчитан на стабильную работу в self-hosted окружении: с health-check'ами, ретраями, восстановлением зависших задач и операционными runbook'ами.
 
 ## Ключевые возможности
 
@@ -39,7 +39,7 @@ Production-first Telegram bot для сохранения контента в Ob
 - `tests` — автотесты.
 - `deploy` — deployment artifacts (включая systemd unit-файлы).
 
-## Быстрый старт (локально)
+## Быстрый старт
 
 ```bash
 python -m venv .venv
@@ -48,24 +48,30 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-Запустите bot, worker и watcher в отдельных терминалах:
+Windows:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+Copy-Item .env.example .env
+```
+
+Linux / macOS:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env
+```
+
+Запуск ролей в отдельных терминалах:
 
 ```bash
 python -m src.main --role bot
 python -m src.main --role worker
 python -m src.main --role watcher
-```
-
-Для Windows можно использовать:
-
-```powershell
-.\run_local.ps1
-```
-
-Или одной командой поднять сразу `bot` и `worker`:
-
-```powershell
-.\scripts\start_all.ps1
 ```
 
 ## Быстрый старт (Docker Compose)
@@ -96,11 +102,16 @@ Health endpoints:
 - `GEMINI_API_KEY`
 - `GEMINI_EMBED_MODEL`
 - `GEMINI_GENERATION_MODEL`
+- `GDRIVE_ENABLED`, `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN`, `GDRIVE_ROOT_FOLDER_ID`
 
 Для webhook режима:
 
 - `WEBHOOK_BASE_URL`
 - `WEBHOOK_SECRET_TOKEN` (длинный случайный секрет)
+
+Для Mini App deep-link'ов из бота:
+
+- `MINI_APP_BASE_URL`
 
 Для watcher fallback-поллинга:
 
@@ -114,6 +125,8 @@ Health endpoints:
 - `/summary <question>` — grounded summary по индексу.
 - `/retry <job_id_or_prefix>` — ручной ретрай задачи.
 - `/delete <note_id|job_id_prefix|file_name>` — удалить заметку (файл + индекс + DB-запись).
+
+Если задан `MINI_APP_BASE_URL`, бот будет добавлять WebApp CTA-кнопки в `/start`, `/status`, `/find` и `/summary`.
 
 Сообщения можно отправлять с тегами действий:
 
@@ -168,6 +181,14 @@ python scripts/weekly_healthcheck.py `
    - `recent_note_paths` должен показывать пути недавно сохранённых заметок.
 3. Если `TENANT_MODE=multi`, заметки пишутся в подпапку `VAULT_PATH/<tenant_id>` (например, `tg_123456789`).
 
+## Google Drive
+
+Если `GDRIVE_ENABLED=true`, worker включает три фоновых сценария:
+
+1. Telegram media выгружается в Google Drive до записи заметки, а в `BOT_LINKS` добавляется прямой Drive URL.
+2. Все markdown-заметки зеркалятся в папку `vault_mirror/` каждые 30 минут.
+3. `bot_state.sqlite3` ежедневно снапшотится в `db_snapshots/`.
+
 ## Лицензия
 
-В репозитории пока не добавлен отдельный `LICENSE` файл.
+См. [LICENSE.md](LICENSE.md).
