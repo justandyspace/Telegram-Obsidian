@@ -283,7 +283,7 @@ def build_command_router(
                 CARD_DIVIDER,
             ]
             for idx, hit in enumerate(_dedupe_hits_by_file(hits)[:3], start=1):
-                safe_file = html.escape(_display_note_name(hit.file_name))
+                safe_file = html.escape(_source_label(hit.file_name, idx))
                 snippet = html.escape(_preview_text(hit.chunk_text))
                 lines.append(f"<b>{idx}.</b> <code>{safe_file}</code>")
                 lines.append(f"💬 <i>{snippet}</i>")
@@ -362,14 +362,14 @@ def build_command_router(
                     "",
                 ]
                 for idx, src in enumerate(source_hits[:3], start=1):
-                    safe_file = html.escape(_display_note_name(src.file_name))
+                    safe_file = html.escape(_source_label(src.file_name, idx))
                     snippet = html.escape(_preview_text(src.chunk_text))
                     lines.append(f"{idx}. <b>{safe_file}</b>")
                     lines.append(f"   {snippet}")
                 lines.append("")
                 lines.append("📚 <b>Источники</b>")
-                for src in source_hits[:4]:
-                    safe_file = html.escape(src.file_name)
+                for idx, src in enumerate(source_hits[:4], start=1):
+                    safe_file = html.escape(_source_label(src.file_name, idx))
                     lines.append(f"• <code>{safe_file}</code>")
                 await message.answer(
                     "\n".join(lines),
@@ -386,8 +386,8 @@ def build_command_router(
                 "",
                 "📚 <b>На основе заметок</b>",
             ]
-            for src in source_hits[:4]:
-                safe_file = html.escape(src.file_name)
+            for idx, src in enumerate(source_hits[:4], start=1):
+                safe_file = html.escape(_source_label(src.file_name, idx))
                 lines.append(f"• <code>{safe_file}</code>")
             await message.answer(
                 "\n".join(lines),
@@ -684,6 +684,20 @@ def _display_note_name(file_name: str) -> str:
             return f"Материал из {compact}"
         return "Сохранённый материал"
     return cleaned or "Сохранённая заметка"
+
+
+def _source_label(file_name: str, index: int) -> str:
+    base_name = Path(file_name).name or file_name
+    display = _display_note_name(file_name).strip()
+    generic = {
+        "",
+        "Note",
+        "Сохранённая заметка",
+        "Сохранённый материал",
+    }
+    if display in generic or display.lower().startswith("материал из "):
+        return f"Источник {index}"
+    return base_name
 
 
 def _preview_text(text: str, max_chars: int = 180) -> str:
