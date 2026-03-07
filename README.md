@@ -1,12 +1,39 @@
-# VaultPulse v0.1
+# VaultPulse OSS
 
-Telegram bot для быстрого сохранения текста, ссылок и медиа из Telegram в Obsidian.
+[![Release](https://img.shields.io/github/v/release/justandyspace/VaultPulse-OSS?label=release)](https://github.com/justandyspace/VaultPulse-OSS/releases)
+[![License](https://img.shields.io/github/license/justandyspace/VaultPulse-OSS)](https://github.com/justandyspace/VaultPulse-OSS/blob/main/LICENSE.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/justandyspace/VaultPulse-OSS/ci.yml?branch=main&label=CI)](https://github.com/justandyspace/VaultPulse-OSS/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 
-## Почему этот проект
+Turn Telegram into a structured capture layer for Obsidian.
 
-`VaultPulse` принимает сообщения и ссылки из Telegram, безопасно обрабатывает контент и сохраняет заметки в Obsidian-совместимую структуру. Проект рассчитан на стабильную работу в self-hosted окружении: с health-check'ами, ретраями, восстановлением зависших задач и операционными runbook'ами.
+VaultPulse ingests text, links, voice messages, and media from Telegram, converts them into searchable Markdown notes, and stores them directly in your Obsidian vault.
 
-## Ключевые возможности
+## Why VaultPulse
+
+Telegram is convenient for capturing ideas, but it quickly becomes an unstructured archive of links, files, half-finished thoughts, and voice notes. VaultPulse turns that stream into something usable: clean notes in Obsidian that you can actually browse, search, and summarize later.
+
+It is built for self-hosted use. Your data stays local, Docker support is included, and the ingestion pipeline is designed to keep running reliably instead of falling apart on retries, stuck jobs, or malformed inputs.
+
+## What It Does
+
+- Captures text, links, voice messages, and media from Telegram.
+- Converts incoming content into structured Markdown notes inside Obsidian.
+- Indexes saved notes for semantic search and grounded summaries.
+- Runs locally or through Docker Compose.
+- Keeps the pipeline operational with retries, stuck-job recovery, and health endpoints.
+
+## How It Works
+
+| Step | What happens |
+| --- | --- |
+| 1. Capture | Send a message, link, voice note, or file to the Telegram bot. |
+| 2. Enrich | VaultPulse extracts text, metadata, and relevant context from the input. |
+| 3. Store | The result is saved as a clean Markdown note in your Obsidian vault. |
+| 4. Retrieve | Use `/find` and `/summary` to search and synthesize what you saved. |
+
+## Key Features
 
 - Строгая авторизация по allowlist (`TELEGRAM_ALLOWED_USER_ID(S)`).
 - Поддержка режимов Telegram: `polling`, `webhook`, `auto`.
