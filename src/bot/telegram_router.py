@@ -469,8 +469,18 @@ def _display_note_name(file_name: str) -> str:
     stem = Path(file_name).stem
     match = re.match(r"^\d{8}-\d{4}\s*-\s*(.+)\s+\([A-Z0-9]{8}\)$", stem)
     if match:
-        return match.group(1).strip()[:80]
-    return stem[:80]
+        value = match.group(1).strip()[:80]
+    else:
+        value = stem[:80]
+    if re.fullmatch(r"note(?:\s+\S+)?", value, re.IGNORECASE):
+        return "Сохранённая заметка"
+    if value.lower().startswith(("http ", "https ", "www ")):
+        compact = value.replace("https ", "").replace("http ", "").replace("www ", "")
+        compact = compact.split()[0].strip("/:-")
+        if compact:
+            return f"Материал из {compact}"[:80]
+        return "Сохранённый материал"
+    return value or "Сохранённая заметка"
 
 
 def _humanize_note_destination(*, note_path: Path, base_vault_path: Path | None) -> tuple[str, str]:

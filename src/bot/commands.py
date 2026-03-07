@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 
 from aiogram import F, Router
@@ -673,7 +674,16 @@ def _display_note_name(file_name: str) -> str:
         stem = parts[1]
     if stem.endswith(")") and "(" in stem:
         stem = stem.rsplit("(", 1)[0].rstrip()
-    return stem.strip() or Path(file_name).stem
+    cleaned = stem.strip()
+    if re.fullmatch(r"note(?:\s+\S+)?", cleaned, re.IGNORECASE):
+        return "Сохранённая заметка"
+    if cleaned.lower().startswith(("http ", "https ", "www ")):
+        compact = cleaned.replace("https ", "").replace("http ", "").replace("www ", "")
+        compact = compact.split()[0].strip("/:-")
+        if compact:
+            return f"Материал из {compact}"
+        return "Сохранённый материал"
+    return cleaned or "Сохранённая заметка"
 
 
 def _preview_text(text: str, max_chars: int = 180) -> str:
