@@ -150,9 +150,9 @@ class ObsidianHelpersTests(unittest.TestCase):
             forward_source="Channel",
         )
         rendered = render_meta(payload)
-        self.assertIn("forward_source: Channel", rendered)
-        self.assertIn("actions: #save, #summary", rendered)
-        self.assertIn("tags: #tag1, #tag2", rendered)
+        self.assertIn('forward: "Channel"', rendered)
+        self.assertIn("actions: [save, summary]", rendered)
+        self.assertIn("tags: [tag1, tag2]", rendered)
 
     def test_dedup_keys_are_stable_and_action_sensitive(self) -> None:
         fingerprint_a = build_content_fingerprint(

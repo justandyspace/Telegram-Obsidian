@@ -53,9 +53,14 @@ async def run_worker(
 
         LOGGER.info("Processing job_id=%s", job.job_id)
         try:
-            parsed_payload = enrich_payload(job.payload)
-            parsed_payload = enrich_payload_with_drive_attachments(parsed_payload, drive_client)
-            processed_payload = enrich_payload_with_ai(
+            parsed_payload = await asyncio.to_thread(enrich_payload, job.payload)
+            parsed_payload = await asyncio.to_thread(
+                enrich_payload_with_drive_attachments,
+                parsed_payload,
+                drive_client,
+            )
+            processed_payload = await asyncio.to_thread(
+                enrich_payload_with_ai,
                 parsed_payload,
                 api_key=config.gemini_api_key,
                 model_name=config.gemini_generation_model,
@@ -66,15 +71,19 @@ async def run_worker(
                     f"Tenant mismatch for job {job.job_id}: queue={job.tenant_id} payload={payload_tenant}"
                 )
 
-            note_path = writer.write(job_id=job.job_id, payload=processed_payload)
+            note_path = await asyncio.to_thread(
+                writer.write,
+                job_id=job.job_id,
+                payload=processed_payload,
+            )
             if drive_client is not None:
                 try:
-                    mirror_note_to_drive(config, drive_client, Path(note_path))
+                    await asyncio.to_thread(mirror_note_to_drive, config, drive_client, Path(note_path))
                 except Exception as exc:  # noqa: BLE001
                     LOGGER.warning("Immediate note mirror skipped for %s: %s", note_path, exc)
             rag = rag_manager.for_tenant(payload_tenant)
             try:
-                rag.index_note(Path(note_path))
+                await asyncio.to_thread(rag.index_note, Path(note_path))
             except EmbedderError as exc:
                 # Note is already written. Keep queue healthy even if remote embeddings are unavailable.
                 LOGGER.warning(

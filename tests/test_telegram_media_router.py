@@ -55,7 +55,7 @@ class TelegramMediaRouterTests(unittest.TestCase):
             voice=SimpleNamespace(file_id="voice_id"),
         )
         url = asyncio.run(_extract_telegram_media_url(message))
-        self.assertEqual(url, "https://api.telegram.org/file/botabc123/voice/file_1.ogg")
+        self.assertEqual(url, "telegram-file:///voice/file_1.ogg")
         self.assertEqual(bot.last_file_id, "voice_id")
 
     def test_extract_media_url_returns_empty_on_failure(self) -> None:
@@ -75,7 +75,7 @@ class TelegramMediaRouterTests(unittest.TestCase):
         url = asyncio.run(_extract_telegram_media_url(message))
         self.assertEqual(
             url,
-            "https://api.telegram.org/file/botabc123/video_notes/file_2.mp4#tgmime=video%2Fmp4",
+            "telegram-file:///video_notes/file_2.mp4#tgmime=video%2Fmp4",
         )
         self.assertEqual(bot.last_file_id, "video_note_id")
 
@@ -88,7 +88,7 @@ class TelegramMediaRouterTests(unittest.TestCase):
         url = asyncio.run(_extract_telegram_media_url(message))
         self.assertEqual(
             url,
-            "https://api.telegram.org/file/botabc123/video/file_3.mp4#tgmime=video%2Fmp4",
+            "telegram-file:///video/file_3.mp4#tgmime=video%2Fmp4",
         )
         self.assertEqual(bot.last_file_id, "video_id")
 
@@ -101,7 +101,7 @@ class TelegramMediaRouterTests(unittest.TestCase):
         url = asyncio.run(_extract_telegram_media_url(message))
         self.assertEqual(
             url,
-            "https://api.telegram.org/file/botabc123/documents/file_4#tgmime=audio%2Fogg",
+            "telegram-file:///documents/file_4#tgmime=audio%2Fogg",
         )
         self.assertEqual(bot.last_file_id, "doc_audio_id")
 
@@ -114,7 +114,7 @@ class TelegramMediaRouterTests(unittest.TestCase):
         url = asyncio.run(_extract_telegram_media_url(message))
         self.assertEqual(
             url,
-            "https://api.telegram.org/file/botabc123/documents/file_5#tgmime=video%2Fquicktime",
+            "telegram-file:///documents/file_5#tgmime=video%2Fquicktime",
         )
         self.assertEqual(bot.last_file_id, "doc_video_id")
 
@@ -140,23 +140,22 @@ class TelegramMediaRouterTests(unittest.TestCase):
         self.assertTrue(_is_transcribable_media_message(document_message))
 
     def test_build_voice_ingest_text_keeps_media_url_extractable(self) -> None:
-        media_url = "https://api.telegram.org/file/botabc123/voice/file_1.ogg"
+        media_url = "telegram-file:///voice/file_1.ogg"
         text = _build_voice_ingest_text(caption="Короткий комментарий", media_url=media_url)
 
         self.assertIn(media_url, text)
-        self.assertEqual(extract_urls(text), [media_url])
+        self.assertEqual(extract_urls(text), [])
+        self.assertNotIn("api.telegram.org/file/bot", text)
 
     def test_build_voice_ingest_text_keeps_fragment_hint_url_extractable(self) -> None:
-        media_url = (
-            "https://api.telegram.org/file/botabc123/documents/file_7#tgmime=audio%2Fogg"
-        )
+        media_url = "telegram-file:///documents/file_7#tgmime=audio%2Fogg"
         text = _build_voice_ingest_text(caption="", media_url=media_url)
 
         self.assertIn(media_url, text)
-        self.assertEqual(extract_urls(text), [media_url])
+        self.assertEqual(extract_urls(text), [])
 
     def test_build_voice_ingest_text_keeps_url_out_of_generated_title_prefix(self) -> None:
-        media_url = "https://api.telegram.org/file/botabc123/voice/file_1.ogg"
+        media_url = "telegram-file:///voice/file_1.ogg"
         raw_text = _build_voice_ingest_text(caption="", media_url=media_url)
         content = normalize_text(strip_hashtags(raw_text))
         title = ascii_safe_title(derive_title(content))

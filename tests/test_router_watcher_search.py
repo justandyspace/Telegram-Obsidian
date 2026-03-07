@@ -127,7 +127,9 @@ class SearchHelpersTests(unittest.TestCase):
     def test_find_notes_and_latest_notes_cover_matches_and_read_failures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp)
-            alpha = vault / "alpha.md"
+            nested = vault / "nested"
+            nested.mkdir()
+            alpha = nested / "alpha.md"
             beta = vault / "beta.md"
             alpha.write_text("# Alpha\nNeedle appears twice. Needle is here.", encoding="utf-8")
             beta.write_text("# Beta\nAnother note", encoding="utf-8")
@@ -303,13 +305,13 @@ class TelegramRouterRuntimeTests(unittest.TestCase):
             asyncio.run(
                 _watch_job_and_notify(
                     bot=failed_bot,
-                    store=_Store([{"status": "failed", "error": "boom"}]),
+                    store=_Store([{"status": "failed", "error": "<boom>"}]),
                     tenant_id="t",
                     job_id="j",
                     chat_id=1,
                 )
             )
-            self.assertIn("boom", failed_bot.sent_messages[0])
+            self.assertIn("&lt;boom&gt;", failed_bot.sent_messages[0])
 
             timeout_bot = _FakeBot()
             with patch.object(timeout_bot, "send_chat_action", side_effect=RuntimeError("typing failed")):

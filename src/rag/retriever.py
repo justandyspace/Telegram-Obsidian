@@ -97,7 +97,7 @@ class RagService:
 
     def reindex_vault_incremental(self, limit: int = 25) -> int:
         indexed = 0
-        for path in sorted(self.vault_path.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for path in sorted(self.vault_path.rglob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
             changed = self.index_note(path)
             if changed:
                 indexed += 1

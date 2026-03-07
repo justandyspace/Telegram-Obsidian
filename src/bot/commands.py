@@ -172,8 +172,7 @@ def build_command_router(
                 reply_markup=_quick_actions_markup(),
             )
             return
-        message.text = "/summary"
-        await summary_handler(message)
+        await _answer_summary(message, query="")
 
     @router.message((F.text == "🔎 Найти") | (F.text == "🔎 Поиск"))
     async def quick_search_handler(message: Message) -> None:
@@ -317,9 +316,11 @@ def build_command_router(
         if not _authorized(message):
             return
 
+        await _answer_summary(message, query=_extract_args(message))
+
+    async def _answer_summary(message: Message, *, query: str) -> None:
         tenant_id = _tenant_id(message)
         rag = rag_manager.for_tenant(tenant_id)
-        query = _extract_args(message)
         if query:
             word_count = len(query.split())
             if len(query) > SUMMARY_MAX_QUERY_CHARS or word_count > SUMMARY_MAX_QUERY_WORDS:
@@ -700,15 +701,26 @@ def _dedupe_hits_by_file(hits) -> list:
 
 
 def _resolve_note_path(vault_root: Path, file_name: str) -> Path:
-    direct = (vault_root / file_name).resolve()
-    if direct.exists():
+    normalized = file_name.strip()
+    direct = (vault_root / normalized).resolve()
+    if direct.exists() and direct.is_file():
+        return direct
+    if not normalized or _has_glob_metacharacters(normalized):
+        return direct
+    candidate_name = Path(normalized).name
+    if candidate_name != normalized:
         return direct
 
     matches = sorted(
         candidate.resolve()
-        for candidate in vault_root.rglob(file_name)
+        for candidate in vault_root.rglob("*.md")
         if candidate.is_file()
+        and candidate.name == candidate_name
     )
     if matches:
         return matches[0]
     return direct
+
+
+def _has_glob_metacharacters(value: str) -> bool:
+    return any(char in value for char in "*?[]")

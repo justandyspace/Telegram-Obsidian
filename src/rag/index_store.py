@@ -28,7 +28,6 @@ class RetrievedChunk:
 class IndexStore:
     def __init__(self, index_db_path: Path) -> None:
         self._db_path = index_db_path
-        self._conn: sqlite3.Connection | None = None
 
     def initialize(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,34 +82,38 @@ class IndexStore:
         now = _utc_now_iso()
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute("DELETE FROM chunks WHERE note_path = ?", (note_path,))
-            for idx, (chunk, vector) in enumerate(zip(chunks, embeddings, strict=False)):
-                chunk_id = f"{note_path}::{idx}"
+            try:
+                conn.execute("DELETE FROM chunks WHERE note_path = ?", (note_path,))
+                for idx, (chunk, vector) in enumerate(zip(chunks, embeddings, strict=False)):
+                    chunk_id = f"{note_path}::{idx}"
+                    conn.execute(
+                        """
+                        INSERT INTO chunks (chunk_id, note_path, ordinal, chunk_text, embedding_json, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            chunk_id,
+                            note_path,
+                            idx,
+                            chunk,
+                            json.dumps(vector, separators=(",", ":")),
+                            now,
+                        ),
+                    )
                 conn.execute(
                     """
-                    INSERT INTO chunks (chunk_id, note_path, ordinal, chunk_text, embedding_json, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO documents (note_path, content_hash, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(note_path) DO UPDATE SET
+                        content_hash = excluded.content_hash,
+                        updated_at = excluded.updated_at
                     """,
-                    (
-                        chunk_id,
-                        note_path,
-                        idx,
-                        chunk,
-                        json.dumps(vector, separators=(",", ":")),
-                        now,
-                    ),
+                    (note_path, content_hash, now),
                 )
-            conn.execute(
-                """
-                INSERT INTO documents (note_path, content_hash, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(note_path) DO UPDATE SET
-                    content_hash = excluded.content_hash,
-                    updated_at = excluded.updated_at
-                """,
-                (note_path, content_hash, now),
-            )
-            conn.execute("COMMIT")
+                conn.execute("COMMIT")
+            except Exception:  # pragma: no cover
+                conn.execute("ROLLBACK")
+                raise
 
     def search(self, query_embedding: list[float], top_k: int = 5) -> list[RetrievedChunk]:
         rows: list[dict] = []
@@ -151,34 +154,32 @@ class IndexStore:
     def delete_document(self, note_path: str) -> bool:
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute("DELETE FROM chunks WHERE note_path = ?", (note_path,))
-            deleted_doc = conn.execute(
-                "DELETE FROM documents WHERE note_path = ?",
-                (note_path,),
-            )
-            conn.execute("COMMIT")
-            return int(deleted_doc.rowcount or 0) > 0
+            try:
+                conn.execute("DELETE FROM chunks WHERE note_path = ?", (note_path,))
+                deleted_doc = conn.execute(
+                    "DELETE FROM documents WHERE note_path = ?",
+                    (note_path,),
+                )
+                conn.execute("COMMIT")
+                return int(deleted_doc.rowcount or 0) > 0
+            except Exception:  # pragma: no cover
+                conn.execute("ROLLBACK")
+                raise
 
     @contextmanager
     def _connection(self):
-        conn = self._connect()
-        yield conn
+        with self._connect() as conn:
+            yield conn
 
-    def _connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path), timeout=30, isolation_level=None)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-        return self._conn
+    def _connect(self) -> _ManagedConnection:
+        conn = sqlite3.connect(str(self._db_path), timeout=30, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return _ManagedConnection(conn)
 
     def close(self) -> None:
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except Exception as exc:  # noqa: BLE001
-                _log.warning("Failed to close index store connection cleanly: %s", exc)
-            self._conn = None
+        return None
 
 
 def _utc_now_iso() -> str:
@@ -190,7 +191,23 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
         return 0.0
     if len(a) != len(b):
         _log.warning("Embedding dimension mismatch: %d vs %d", len(a), len(b))
-        n = min(len(a), len(b))
-    else:
-        n = len(a)
-    return float(sum(a[i] * b[i] for i in range(n)))
+        return 0.0
+    return float(sum(a[i] * b[i] for i in range(len(a))))
+
+
+class _ManagedConnection:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def __getattr__(self, name: str):
+        return getattr(self._conn, name)
+
+    def __enter__(self) -> sqlite3.Connection:
+        self._conn.__enter__()
+        return self._conn
+
+    def __exit__(self, exc_type, exc, tb) -> bool | None:
+        try:
+            return self._conn.__exit__(exc_type, exc, tb)
+        finally:
+            self._conn.close()

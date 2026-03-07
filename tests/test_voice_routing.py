@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.parsers.models import ParseResult
-from src.parsers.router import classify_source, parse_url
+from src.parsers.router import classify_source, enrich_payload, parse_url
 
 
 class VoiceRoutingTests(unittest.TestCase):
@@ -21,6 +21,22 @@ class VoiceRoutingTests(unittest.TestCase):
             classify_source("https://api.telegram.org/file/bot123/documents/file_11#tgmime=audio%2Fogg"),
             "voice",
         )
+
+    def test_classify_source_detects_safe_telegram_media_source(self) -> None:
+        self.assertEqual(
+            classify_source("telegram-file:///voice/file_11.ogg#tgmime=audio%2Fogg"),
+            "voice",
+        )
+
+    def test_enrich_payload_includes_media_source_outside_http_text_urls(self) -> None:
+        payload = enrich_payload(
+            {
+                "content": "Voice message transcript from Telegram audio",
+                "media_source": "telegram-file:///voice/file_11.ogg#tgmime=audio%2Fogg",
+            }
+        )
+        self.assertEqual(len(payload["parsed_items"]), 1)
+        self.assertEqual(payload["parsed_items"][0]["parser"], "voice")
 
     @patch("src.parsers.router.parse_voice")
     def test_parse_url_routes_audio_link_to_voice_parser(self, mock_parse_voice) -> None:

@@ -16,7 +16,7 @@ def find_notes(vault_path: Path, query: str, limit: int = 5) -> list[dict[str, s
         return []
 
     matches: list[dict[str, str]] = []
-    for note_file in sorted(vault_path.glob("*.md")):
+    for note_file in sorted(vault_path.rglob("*.md")):
         try:
             content = note_file.read_text(encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
@@ -44,7 +44,7 @@ def find_notes(vault_path: Path, query: str, limit: int = 5) -> list[dict[str, s
 
 
 def latest_notes(vault_path: Path, limit: int = 5) -> list[dict[str, str]]:
-    files = sorted(vault_path.glob("*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
+    files = sorted(vault_path.rglob("*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
     items: list[dict[str, str]] = []
     for note_file in files[:limit]:
         try:

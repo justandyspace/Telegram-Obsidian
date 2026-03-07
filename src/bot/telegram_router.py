@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import html
+from collections.abc import Coroutine
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,7 @@ from src.pipeline.jobs import JobService
 from src.rag.retriever import RagManager
 
 LOGGER = get_logger(__name__)
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 
 def build_router(
@@ -72,6 +75,7 @@ def build_router(
             message_id=message.message_id,
             message_datetime=message_dt,
             raw_text=raw_text,
+            media_source=media_url,
             forward_source=forward_source,
         )
 
@@ -93,7 +97,7 @@ def build_router(
                 reply_markup=build_quick_actions_keyboard(mini_app_base_url),
             )
             if bot is not None:
-                asyncio.create_task(
+                _start_background_task(
                     _watch_job_and_notify(
                         bot=bot,
                         store=store,
@@ -102,7 +106,8 @@ def build_router(
                         chat_id=message.chat.id,
                         base_vault_path=Path(vault_path),
                         mini_app_base_url=mini_app_base_url,
-                    )
+                    ),
+                    label=f"watch-job:{result.job_id}",
                 )
             return
 
@@ -201,7 +206,7 @@ def build_router(
             )
             bot = message.bot
             if bot is not None:
-                asyncio.create_task(
+                _start_background_task(
                     _watch_job_and_notify(
                         bot=bot,
                         store=store,
@@ -210,7 +215,8 @@ def build_router(
                         chat_id=message.chat.id,
                         base_vault_path=Path(vault_path),
                         mini_app_base_url=mini_app_base_url,
-                    )
+                    ),
+                    label=f"watch-job:{result.job_id}",
                 )
             return
 
@@ -250,11 +256,16 @@ async def _extract_telegram_media_url(message: Message) -> str:
     file_path = str(getattr(file, "file_path", "") or "")
     if not file_path:
         return ""
-    media_url = f"https://api.telegram.org/file/bot{message.bot.token}/{file_path}"
+    media_url = _build_telegram_media_source(file_path)
     if mime_hint:
         encoded_mime = quote(mime_hint, safe="")
         return f"{media_url}#tgmime={encoded_mime}"
     return media_url
+
+
+def _build_telegram_media_source(file_path: str) -> str:
+    encoded_path = quote(str(file_path).lstrip("/"), safe="/._-")
+    return f"telegram-file:///{encoded_path}"
 
 
 def _is_transcribable_media_message(message: Message) -> bool:
@@ -332,9 +343,9 @@ async def _watch_job_and_notify(
                     text=(
                         "✅ <b>Готово!</b>\n\n"
                         "Материал обработан и сохранён в Obsidian.\n"
-                        f"📝 <b>Заметка:</b> <code>{display_name}</code>\n"
-                        f"📁 <b>Папка:</b> <code>{folder_name}</code>\n"
-                        f"📍 <b>Путь:</b> <code>{relative_note_path}</code>"
+                        f"📝 <b>Заметка:</b> <code>{html.escape(display_name)}</code>\n"
+                        f"📁 <b>Папка:</b> <code>{html.escape(folder_name)}</code>\n"
+                        f"📍 <b>Путь:</b> <code>{html.escape(relative_note_path)}</code>"
                     ),
                     parse_mode="HTML",
                     reply_markup=quick_actions,
@@ -353,7 +364,7 @@ async def _watch_job_and_notify(
                 chat_id=chat_id,
                 text=(
                     "❌ <b>Обработка не завершена</b>\n\n"
-                    f"Причина: <code>{error[:300]}</code>"
+                    f"Причина: <code>{html.escape(error[:300])}</code>"
                 ),
                 parse_mode="HTML",
                 reply_markup=quick_actions,
@@ -380,6 +391,23 @@ def _build_voice_ingest_text(*, caption: str, media_url: str) -> str:
         lines.append(f"Context: {caption}")
     lines.append(f"Media URL: {media_url}")
     return "\n".join(lines)
+
+
+def _start_background_task(coro: Coroutine[Any, Any, Any], *, label: str) -> asyncio.Task[Any]:
+    task = asyncio.create_task(coro, name=label)
+    _BACKGROUND_TASKS.add(task)
+
+    def _finalize(done: asyncio.Task[Any]) -> None:
+        _BACKGROUND_TASKS.discard(done)
+        try:
+            done.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            LOGGER.exception("Background task failed label=%s", label)
+
+    task.add_done_callback(_finalize)
+    return task
 
 
 def _display_note_name(file_name: str) -> str:

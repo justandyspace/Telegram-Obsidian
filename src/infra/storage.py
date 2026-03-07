@@ -29,32 +29,32 @@ class QueueJob:
 class StateStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._conn: sqlite3.Connection | None = None
 
     def initialize(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = self._connect()
-        self._ensure_meta_table(conn)
+        with self._connect() as conn:
+            self._ensure_meta_table(conn)
 
-        current_version = self._detect_schema_version(conn)
-        if current_version < 1:
-            self._migrate_to_v1(conn)
-            current_version = 1
-        if current_version < 2:
-            self._migrate_to_v2(conn)
-            current_version = 2
-        if current_version < 3:
-            self._migrate_to_v3(conn)
-            current_version = 3
-        if current_version < 4:
-            self._migrate_to_v4(conn)
-            current_version = 4
+            current_version = self._detect_schema_version(conn)
+            if current_version < 1:
+                self._migrate_to_v1(conn)
+                current_version = 1
+            if current_version < 2:
+                self._migrate_to_v2(conn)
+                current_version = 2
+            if current_version < 3:
+                self._migrate_to_v3(conn)
+                current_version = 3
+            if current_version < 4:
+                self._migrate_to_v4(conn)
+                current_version = 4
 
-        self._set_schema_version(conn, current_version)
-        self._migrate_legacy_tables(conn)
+            self._set_schema_version(conn, current_version)
+            self._migrate_legacy_tables(conn)
 
     def schema_version(self) -> int:
-        return self._detect_schema_version(self._connect())
+        with self._connect() as conn:
+            return self._detect_schema_version(conn)
 
     def enqueue_job(
         self,
@@ -111,44 +111,48 @@ class StateStore:
 
     def acquire_next_job(self) -> QueueJob | None:
         now = _utc_now_iso()
-        conn = self._connect()
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            """
-            SELECT * FROM jobs_mt
-            WHERE status IN ('pending', 'retry')
-              AND (next_retry_at IS NULL OR next_retry_at <= ?)
-            ORDER BY created_at ASC
-            LIMIT 1
-            """,
-            (now,),
-        ).fetchone()
-        if row is None:
-            conn.execute("COMMIT")
-            return None
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    """
+                    SELECT * FROM jobs_mt
+                    WHERE status IN ('pending', 'retry')
+                      AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                    """,
+                    (now,),
+                ).fetchone()
+                if row is None:
+                    conn.execute("COMMIT")
+                    return None
 
-        conn.execute(
-            """
-            UPDATE jobs_mt
-            SET status = 'processing',
-                updated_at = ?,
-                processing_started_at = ?,
-                next_retry_at = NULL
-            WHERE job_id = ?
-            """,
-            (now, now, row["job_id"]),
-        )
-        conn.execute("COMMIT")
+                conn.execute(
+                    """
+                    UPDATE jobs_mt
+                    SET status = 'processing',
+                        updated_at = ?,
+                        processing_started_at = ?,
+                        next_retry_at = NULL
+                    WHERE job_id = ?
+                    """,
+                    (now, now, row["job_id"]),
+                )
+                conn.execute("COMMIT")
 
-        return QueueJob(
-            job_id=str(row["job_id"]),
-            tenant_id=str(row["tenant_id"]),
-            idempotency_key=str(row["idempotency_key"]),
-            content_fingerprint=str(row["content_fingerprint"]),
-            payload=json.loads(str(row["payload_json"])),
-            attempts=int(row["attempts"]),
-            max_attempts=int(row["max_attempts"]),
-        )
+                return QueueJob(
+                    job_id=str(row["job_id"]),
+                    tenant_id=str(row["tenant_id"]),
+                    idempotency_key=str(row["idempotency_key"]),
+                    content_fingerprint=str(row["content_fingerprint"]),
+                    payload=json.loads(str(row["payload_json"])),
+                    attempts=int(row["attempts"]),
+                    max_attempts=int(row["max_attempts"]),
+                )
+            except Exception:  # pragma: no cover - defensive rollback on mid-transaction DB failure
+                conn.execute("ROLLBACK")
+                raise
 
     def mark_done(self, job_id: str, note_path: str) -> None:
         now = _utc_now_iso()
@@ -200,43 +204,47 @@ class StateStore:
         max_processing_age_seconds = max(1, int(max_processing_age_seconds))
         cutoff = (datetime.now(UTC) - timedelta(seconds=max_processing_age_seconds)).isoformat()
         now = _utc_now_iso()
-        conn = self._connect()
-        conn.execute("BEGIN IMMEDIATE")
-        rows = conn.execute(
-            """
-            SELECT job_id FROM jobs_mt
-            WHERE status = 'processing'
-              AND (
-                (processing_started_at IS NOT NULL AND processing_started_at <= ?)
-                OR (processing_started_at IS NULL AND updated_at <= ?)
-              )
-            ORDER BY updated_at ASC
-            LIMIT ?
-            """,
-            (cutoff, cutoff, limit),
-        ).fetchall()
-        if not rows:
-            conn.execute("COMMIT")
-            return 0
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT job_id FROM jobs_mt
+                    WHERE status = 'processing'
+                      AND (
+                        (processing_started_at IS NOT NULL AND processing_started_at <= ?)
+                        OR (processing_started_at IS NULL AND updated_at <= ?)
+                      )
+                    ORDER BY updated_at ASC
+                    LIMIT ?
+                    """,
+                    (cutoff, cutoff, limit),
+                ).fetchall()
+                if not rows:
+                    conn.execute("COMMIT")
+                    return 0
 
-        for row in rows:
-            conn.execute(
-                """
-                UPDATE jobs_mt
-                SET status = 'retry',
-                    next_retry_at = ?,
-                    updated_at = ?,
-                    processing_started_at = NULL,
-                    error = CASE
-                        WHEN error IS NULL OR error = '' THEN 'Recovered from stuck processing state.'
-                        ELSE substr(error || ' | Recovered from stuck processing state.', 1, 1500)
-                    END
-                WHERE job_id = ?
-                """,
-                (now, now, row["job_id"]),
-            )
-        conn.execute("COMMIT")
-        return len(rows)
+                for row in rows:
+                    conn.execute(
+                        """
+                        UPDATE jobs_mt
+                        SET status = 'retry',
+                            next_retry_at = ?,
+                            updated_at = ?,
+                            processing_started_at = NULL,
+                            error = CASE
+                                WHEN error IS NULL OR error = '' THEN 'Recovered from stuck processing state.'
+                                ELSE substr(error || ' | Recovered from stuck processing state.', 1, 1500)
+                            END
+                        WHERE job_id = ?
+                        """,
+                        (now, now, row["job_id"]),
+                    )
+                conn.execute("COMMIT")
+                return len(rows)
+            except Exception:  # pragma: no cover - defensive rollback on mid-transaction DB failure
+                conn.execute("ROLLBACK")
+                raise
 
     def get_note(self, content_fingerprint: str, tenant_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -409,23 +417,37 @@ class StateStore:
     ) -> tuple[bool, str]:
         now = _utc_now_iso()
         token_value = token.strip().upper() if token else None
-        conn = self._connect()
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            row = conn.execute(
-                """
-                SELECT token, expires_at
-                FROM delete_all_confirmations_mt
-                WHERE tenant_id = ? AND user_id = ?
-                LIMIT 1
-                """,
-                (tenant_id, user_id),
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                return False, "not_found"
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    """
+                    SELECT token, expires_at
+                    FROM delete_all_confirmations_mt
+                    WHERE tenant_id = ? AND user_id = ?
+                    LIMIT 1
+                    """,
+                    (tenant_id, user_id),
+                ).fetchone()
+                if row is None:
+                    conn.execute("COMMIT")
+                    return False, "not_found"
 
-            if str(row["expires_at"]) <= now:
+                if str(row["expires_at"]) <= now:
+                    conn.execute(
+                        """
+                        DELETE FROM delete_all_confirmations_mt
+                        WHERE tenant_id = ? AND user_id = ?
+                        """,
+                        (tenant_id, user_id),
+                    )
+                    conn.execute("COMMIT")
+                    return False, "expired"
+
+                if token_value and str(row["token"]).upper() != token_value:
+                    conn.execute("COMMIT")
+                    return False, "token_mismatch"
+
                 conn.execute(
                     """
                     DELETE FROM delete_all_confirmations_mt
@@ -434,24 +456,10 @@ class StateStore:
                     (tenant_id, user_id),
                 )
                 conn.execute("COMMIT")
-                return False, "expired"
-
-            if token_value and str(row["token"]).upper() != token_value:
-                conn.execute("COMMIT")
-                return False, "token_mismatch"
-
-            conn.execute(
-                """
-                DELETE FROM delete_all_confirmations_mt
-                WHERE tenant_id = ? AND user_id = ?
-                """,
-                (tenant_id, user_id),
-            )
-            conn.execute("COMMIT")
-            return True, "confirmed"
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+                return True, "confirmed"
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
     def cancel_delete_all_confirmation(self, *, tenant_id: str, user_id: int) -> bool:
         now = _utc_now_iso()
@@ -681,33 +689,27 @@ class StateStore:
             return True, job_id
 
     def integrity_check(self) -> tuple[bool, str]:
-        conn = self._connect()
-        row = conn.execute("PRAGMA integrity_check").fetchone()
-        if row is None:
-            return False, "integrity_check returned no rows"  # pragma: no cover
-        result = str(row[0] if isinstance(row, tuple) else row["integrity_check"])
-        if result.strip().lower() != "ok":
-            return False, result
-        invalid_status = conn.execute(
-            """
-            SELECT COUNT(*) AS count
-            FROM jobs_mt
-            WHERE status NOT IN ('pending', 'retry', 'processing', 'done', 'failed')
-            """
-        ).fetchone()
-        bad = int(invalid_status["count"]) if invalid_status else 0
-        if bad:
-            return False, f"Found jobs with invalid statuses: {bad}"
-        return True, "ok"
+        with self._connect() as conn:
+            row = conn.execute("PRAGMA integrity_check").fetchone()
+            if row is None:
+                return False, "integrity_check returned no rows"  # pragma: no cover
+            result = str(row[0] if isinstance(row, tuple) else row["integrity_check"])
+            if result.strip().lower() != "ok":
+                return False, result
+            invalid_status = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM jobs_mt
+                WHERE status NOT IN ('pending', 'retry', 'processing', 'done', 'failed')
+                """
+            ).fetchone()
+            bad = int(invalid_status["count"]) if invalid_status else 0
+            if bad:
+                return False, f"Found jobs with invalid statuses: {bad}"
+            return True, "ok"
 
     def close(self) -> None:
-        conn = self._conn
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.warning("Failed to close state DB connection cleanly: %s", exc)
-            self._conn = None
+        return None
 
     def _ensure_meta_table(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -907,14 +909,13 @@ class StateStore:
                     ),
                 )
 
-    def _connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path), timeout=30, isolation_level=None)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
-        return self._conn
+    def _connect(self) -> _ManagedConnection:
+        conn = sqlite3.connect(str(self._db_path), timeout=30, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return _ManagedConnection(conn)
 
     def _prune_expired_delete_all_confirmations(self, conn: sqlite3.Connection, *, now: str) -> None:
         conn.execute(
@@ -944,3 +945,21 @@ def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, 
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+class _ManagedConnection:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+    def __enter__(self) -> sqlite3.Connection:
+        self._conn.__enter__()
+        return self._conn
+
+    def __exit__(self, exc_type, exc, tb) -> bool | None:
+        try:
+            return self._conn.__exit__(exc_type, exc, tb)
+        finally:
+            self._conn.close()

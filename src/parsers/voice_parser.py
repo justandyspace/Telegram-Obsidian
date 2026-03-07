@@ -7,7 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, unquote, urlparse
 
 from google import genai
 from google.genai import types
@@ -125,6 +125,21 @@ def parse_voice(source: str, timeout_seconds: int = 40) -> ParseResult:
 
 def _load_audio_bytes(source: str, *, timeout_seconds: int) -> tuple[bytes, str]:
     parsed = urlparse(source)
+    if parsed.scheme == "telegram-file":
+        download_url = _telegram_download_url(source)
+        response = safe_http_get(
+            download_url,
+            timeout_seconds=timeout_seconds,
+            max_body_bytes=30 * 1024 * 1024,
+        )
+        response.raise_for_status()
+        try:
+            return bytes(response.content), _guess_mime_type_from_source(
+                source,
+                response.headers.get("Content-Type", ""),
+            )
+        finally:
+            response.close()
     if parsed.scheme in {"http", "https"}:
         response = safe_http_get(
             source,
@@ -144,6 +159,17 @@ def _load_audio_bytes(source: str, *, timeout_seconds: int) -> tuple[bytes, str]
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"Audio file not found: {source}")
     return path.read_bytes(), _guess_mime_type(str(path))
+
+
+def _telegram_download_url(source: str) -> str:
+    token = os.getenv("TELEGRAM_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("TELEGRAM_TOKEN is required to fetch Telegram media.")
+    parsed = urlparse(source)
+    file_path = unquote(parsed.path.lstrip("/"))
+    if not file_path:
+        raise RuntimeError("Telegram media path is missing.")
+    return f"https://api.telegram.org/file/bot{token}/{file_path}"
 
 
 def _resolve_local_audio_path(source: str, *, timeout_seconds: int) -> str:

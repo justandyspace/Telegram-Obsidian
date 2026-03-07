@@ -57,6 +57,7 @@ class JobService:
             "semantic_hashtags": sorted(semantic_hashtags),
             "actions": sorted(actions),
             "content_fingerprint": content_fingerprint,
+            "media_source": str(request.media_source or "").strip(),
             "source": {
                 "chat_id": request.chat_id,
                 "message_id": request.message_id,

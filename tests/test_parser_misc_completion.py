@@ -293,7 +293,7 @@ class ParserMiscCompletionTests(unittest.TestCase):
         self.assertEqual(chunk_text("same", max_chars=100), ["same"])
         self.assertEqual(_slice_large_text("tiny", 10, 2), ["tiny"])
         self.assertEqual(_cosine_similarity([], [1.0]), 0.0)
-        self.assertEqual(_cosine_similarity([1.0], [1.0, 2.0]), 1.0)
+        self.assertEqual(_cosine_similarity([1.0], [1.0, 2.0]), 0.0)
         self.assertTrue(_is_temp_path(str(Path(tempfile.gettempdir()) / "x.tmp")))
         self.assertEqual(ParseResult(parser="x", source_url="u", status="ok", title="t", text="body").to_payload()["text"], "body")
 
@@ -435,14 +435,7 @@ class ParserMiscCompletionTests(unittest.TestCase):
             index_store.initialize()
             with self.assertRaises(RuntimeError):
                 index_store.upsert_document_chunks(note_path="a", content_hash="b", chunks=["x"], embeddings=[])
-            real_conn = index_store._conn
-            if real_conn is not None:
-                real_conn.close()
-            index_store._conn = MagicMock()
-            index_store._conn.close.side_effect = RuntimeError("close fail")
-            with patch("src.rag.index_store._log.warning") as warning:
-                index_store.close()
-            warning.assert_called_once()
+            self.assertIsNone(index_store.close())
 
             processor = NoteEventProcessor(
                 base_vault_path=vault,
@@ -518,15 +511,27 @@ class ParserMiscCompletionTests(unittest.TestCase):
                     payload={"tenant_id": "t1"},
                     max_attempts=2,
                 )
-                conn = store._connect()
-                conn.execute("UPDATE jobs_mt SET job_id='job-aaa' WHERE job_id=?", (first_job_id,))
-                conn.execute("UPDATE jobs_mt SET job_id='job-bbb' WHERE job_id=?", (second_job_id,))
-                conn.execute("UPDATE jobs_mt SET status='failed' WHERE idempotency_key='job-a'")
-                conn.execute("UPDATE jobs_mt SET status='failed' WHERE idempotency_key='job-b'")
-                ambiguous = store.retry_job("job", tenant_id="t1")
-                self.assertFalse(ambiguous[0])
-                self.assertIn("ambiguous", ambiguous[1])
-                with patch.object(store, "_connect", return_value=SimpleNamespace(execute=lambda sql: SimpleNamespace(fetchone=lambda: ("corrupt",)))):
+                with store._connect() as conn:
+                    conn.execute("UPDATE jobs_mt SET job_id='job-aaa' WHERE job_id=?", (first_job_id,))
+                    conn.execute("UPDATE jobs_mt SET job_id='job-bbb' WHERE job_id=?", (second_job_id,))
+                    conn.execute("UPDATE jobs_mt SET status='failed' WHERE idempotency_key='job-a'")
+                    conn.execute("UPDATE jobs_mt SET status='failed' WHERE idempotency_key='job-b'")
+                    ambiguous = store.retry_job("job", tenant_id="t1")
+                    self.assertFalse(ambiguous[0])
+                    self.assertIn("ambiguous", ambiguous[1])
+
+                class IntegrityConn:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, exc_type, exc, tb):
+                        return False
+
+                    def execute(self, sql: str):
+                        _ = sql
+                        return SimpleNamespace(fetchone=lambda: ("corrupt",))
+
+                with patch.object(store, "_connect", return_value=IntegrityConn()):
                     self.assertEqual(store.integrity_check(), (False, "corrupt"))
             finally:
                 store.close()

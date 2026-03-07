@@ -65,6 +65,7 @@ class IndexStoreTests(unittest.TestCase):
         hits = self.store.search([1.0, 0.0], top_k=1)
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0].note_path, note)
+        self.assertEqual(hits[0].score, 0.0)
 
     def test_rag_service_prunes_stale_deleted_hits(self) -> None:
         vault = Path(self._tmp.name) / "vault"

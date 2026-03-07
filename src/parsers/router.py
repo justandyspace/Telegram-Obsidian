@@ -64,6 +64,8 @@ def classify_url(url: str) -> str:
 
 def classify_source(source: str) -> str:
     parsed = urlparse(source)
+    if parsed.scheme == "telegram-file":
+        return "voice"
     if parsed.scheme in {"http", "https"}:
         return classify_url(source)
     if _is_audio_path(source):
@@ -86,7 +88,11 @@ def parse_url(url: str) -> ParseResult:
 
 def enrich_payload(payload: dict, max_urls: int = 4) -> dict:
     content = str(payload.get("content", ""))
-    urls = extract_urls(content)[:max_urls]
+    urls = extract_urls(content)
+    media_source = str(payload.get("media_source") or "").strip()
+    if media_source and media_source not in urls:
+        urls.append(media_source)
+    urls = urls[:max_urls]
 
     parsed_items = []
     summary_parts = [content]

@@ -14,4 +14,5 @@ class IngestRequest:
     message_id: int
     message_datetime: datetime
     raw_text: str
+    media_source: str | None = None
     forward_source: str | None = None
