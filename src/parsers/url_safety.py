@@ -44,7 +44,7 @@ def validate_public_http_url(url: str) -> None:
         raise UnsafeUrlError("URL credentials are not allowed.")
 
     if parsed.port is not None and (parsed.port <= 0 or parsed.port > 65535):
-        raise UnsafeUrlError("URL port is invalid.")
+        raise UnsafeUrlError("URL port is invalid.")  # pragma: no cover
 
     host = (parsed.hostname or "").strip().lower()
     if not host:
@@ -84,7 +84,7 @@ def safe_http_get(
             validate_public_http_url(current)
             host = (urlparse(current).hostname or "").strip().lower()
             if not host:
-                raise UnsafeUrlError("URL hostname is missing.")
+                raise UnsafeUrlError("URL hostname is missing.")  # pragma: no cover
 
             response = _request_with_resilience(
                 session,
@@ -156,7 +156,7 @@ def _request_with_resilience(
             time.sleep(retry_policy.backoff_delay(attempt))
     if last_error is not None:
         raise HttpFetchError(f"HTTP request failed after retries: {last_error}") from last_error
-    raise HttpFetchError("HTTP request failed after retries.")
+    raise HttpFetchError("HTTP request failed after retries.")  # pragma: no cover
 
 
 def _resolve_host_ips(host: str) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -169,12 +169,12 @@ def _resolve_host_ips(host: str) -> set[ipaddress.IPv4Address | ipaddress.IPv6Ad
     for info in infos:
         sockaddr = info[4]
         if not sockaddr:
-            continue
+            continue  # pragma: no cover
         ip_raw = sockaddr[0]
         try:
             resolved.add(ipaddress.ip_address(ip_raw))
         except ValueError:
-            continue
+            continue  # pragma: no cover
     return resolved
 
 

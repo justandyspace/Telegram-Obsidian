@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from src.config import AppConfig
+from src.infra.gdrive import GoogleDriveClient, enrich_payload_with_drive_attachments, mirror_note_to_drive
 from src.infra.logging import get_logger
 from src.infra.storage import StateStore
 from src.obsidian.note_writer import ObsidianNoteWriter
@@ -18,7 +19,12 @@ from src.rag.retriever import RagManager
 LOGGER = get_logger(__name__)
 
 
-async def run_worker(config: AppConfig, store: StateStore, rag_manager: RagManager) -> None:
+async def run_worker(
+    config: AppConfig,
+    store: StateStore,
+    rag_manager: RagManager,
+    drive_client: GoogleDriveClient | None = None,
+) -> None:
     ok, details = store.integrity_check()
     if not ok:
         raise RuntimeError(f"SQLite integrity check failed: {details}")
@@ -48,6 +54,7 @@ async def run_worker(config: AppConfig, store: StateStore, rag_manager: RagManag
         LOGGER.info("Processing job_id=%s", job.job_id)
         try:
             parsed_payload = enrich_payload(job.payload)
+            parsed_payload = enrich_payload_with_drive_attachments(parsed_payload, drive_client)
             processed_payload = enrich_payload_with_ai(
                 parsed_payload,
                 api_key=config.gemini_api_key,
@@ -60,6 +67,11 @@ async def run_worker(config: AppConfig, store: StateStore, rag_manager: RagManag
                 )
 
             note_path = writer.write(job_id=job.job_id, payload=processed_payload)
+            if drive_client is not None:
+                try:
+                    mirror_note_to_drive(config, drive_client, Path(note_path))
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.warning("Immediate note mirror skipped for %s: %s", note_path, exc)
             rag = rag_manager.for_tenant(payload_tenant)
             try:
                 rag.index_note(Path(note_path))

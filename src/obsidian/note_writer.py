@@ -6,13 +6,14 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from src.infra.storage import StateStore
 from src.infra.tenancy import tenant_vault_path
 from src.obsidian.block_merge import merge_managed_blocks
+from src.obsidian.couchdb_bridge import CouchDBBridge
 from src.obsidian.note_schema import NotePayload, render_meta
 from src.obsidian.vault_router import deterministic_file_name
-from src.obsidian.couchdb_bridge import CouchDBBridge
 from src.pipeline.normalize import short_summary
 
 
@@ -21,9 +22,9 @@ class ObsidianNoteWriter:
         self._vault_path = vault_path
         self._store = store
         self._multi_tenant = multi_tenant
-        
+
         # Initialize CouchDB bridge if configured
-        self._couchdb = None
+        self._couchdb: CouchDBBridge | None = None
         cdb_user = os.getenv("COUCHDB_USER")
         cdb_pass = os.getenv("COUCHDB_PASSWORD")
         cdb_db = os.getenv("COUCHDB_DATABASE", "obsidian")
@@ -33,7 +34,7 @@ class ObsidianNoteWriter:
                 url=cdb_url,
                 user=cdb_user,
                 password=cdb_pass,
-                db_name=cdb_db
+                db_name=cdb_db,
             )
 
     def write(self, *, job_id: str, payload: dict) -> str:
@@ -124,10 +125,10 @@ class ObsidianNoteWriter:
 
     def _bootstrap_document(self, title: str, content: str) -> str:
         return (
-            f"# {title}\n\n"
             "<!-- BOT_META:START -->\n"
             "pending\n"
             "<!-- BOT_META:END -->\n\n"
+            f"# {title}\n\n"
             "<!-- BOT_SUMMARY:START -->\n"
             "pending\n"
             "<!-- BOT_SUMMARY:END -->\n\n"
@@ -137,20 +138,25 @@ class ObsidianNoteWriter:
             "<!-- BOT_TRANSLATION:START -->\n"
             "pending\n"
             "<!-- BOT_TRANSLATION:END -->\n\n"
+            "--- \n\n"
+            "## 📝 User Content\n"
+            f"{content}\n\n"
+            "--- \n\n"
             "<!-- BOT_LINKS:START -->\n"
             "pending\n"
-            "<!-- BOT_LINKS:END -->\n\n"
-            "## User Content\n"
-            f"{content}\n"
+            "<!-- BOT_LINKS:END -->\n"
         )
 
     def _render_summary(self, payload: dict, actions: set[str]) -> str:
         ai_summary = payload.get("ai_summary")
-        if ai_summary:
-            return ai_summary
-            
-        source_text = payload.get("enriched_text") or payload["content"]
-        return short_summary(source_text, max_chars=700)
+        if not ai_summary:
+            source_text = payload.get("enriched_text") or payload["content"]
+            ai_summary = short_summary(source_text, max_chars=700)
+
+        return (
+            "> [!abstract] 🤖 AI Summary\n"
+            f"> {ai_summary.strip().replace(chr(10), chr(10) + '> ')}\n"
+        )
 
     def _render_tasks(self, payload: dict) -> str:
         extracted_tasks = []
@@ -159,50 +165,72 @@ class ObsidianNoteWriter:
             if stripped.startswith("- [ ]") or stripped.startswith("- [x]") or stripped.startswith("* [ ]"):
                 extracted_tasks.append(stripped.replace("* [ ]", "- [ ]"))
 
-        if extracted_tasks:
-            return "\n".join(extracted_tasks[:20])
-
-        title = payload.get("title") or "captured note"
-        return "\n".join(
-            [
+        if not extracted_tasks:
+            title = payload.get("title") or "captured note"
+            extracted_tasks = [
                 f"- [ ] Review: {title}",
                 "- [ ] Decide next action",
                 "- [ ] Archive or link related notes",
             ]
+
+        task_lines = "\n".join(extracted_tasks[:20])
+        return (
+            "> [!todo] ✅ Tasks\n"
+            f"{task_lines.replace('- [', '> - [')}\n"
         )
 
     def _render_links(self, payload: dict, resolved_vault: Path, current_file_name: str) -> str:
         source = payload.get("source", {})
         lines = [
             (
-                "- telegram: "
+                "- 📱 telegram: "
                 f"chat_id={source.get('chat_id')} "
                 f"message_id={source.get('message_id')}"
             )
         ]
+        for attachment in payload.get("cloud_attachments", []):
+            name = str(attachment.get("name") or "attachment")
+            web_link = str(attachment.get("web_view_link") or "").strip()
+            if web_link:
+                lines.append(f"- ☁️ drive: {name} :: {web_link}")
         for item in payload.get("parsed_items", []):
             parser_name = item.get("parser", "unknown")
             status = item.get("status", "unknown")
             title = item.get("title", "").strip() or "untitled"
-            source_url = item.get("source_url", "")
+            source_url = self._sanitize_link(item.get("source_url", ""))
             lines.append(f"- [{parser_name}/{status}] {title} :: {source_url}")
             for extra_link in item.get("links", []):
-                if extra_link and extra_link != source_url:
-                    lines.append(f"- mirror: {extra_link}")
+                safe_link = self._sanitize_link(extra_link)
+                if safe_link and safe_link != source_url:
+                    label = "drive" if "drive.google.com" in urlparse(safe_link).netloc.lower() else "mirror"
+                    lines.append(f"- 🔗 {label}: {safe_link}")
             if item.get("error"):
-                lines.append(f"- parser_error: {item['error']}")
+                lines.append(f"- ❌ parser_error: {item['error']}")
 
         related = self._discover_related_notes(
             resolved_vault=resolved_vault,
             current_file_name=current_file_name,
             payload=payload,
         )
-        if related:
-            lines.append("")
-            lines.append("### Related notes (auto)")
-            lines.extend(f"- [[{note_stem}]]" for note_stem in related)
 
-        return "\n".join(lines)
+        related_block = ""
+        if related:
+            related_block = "\n\n### 🔗 Related notes (auto)\n"
+            related_block += "\n".join(f"- [[{note_stem}]]" for note_stem in related)
+
+        link_lines = "\n".join(lines)
+        return (
+            "> [!info] 🔗 Context & Links\n"
+            f"{link_lines.replace('- ', '> - ')}"
+            f"{related_block.replace(chr(10), chr(10) + '> ')}\n"
+        )
+
+    def _sanitize_link(self, link: str) -> str:
+        value = str(link or "").strip()
+        if "api.telegram.org/file/bot" not in value:
+            return value
+        file_name = Path(urlparse(value).path).name or "telegram-media"
+        return f"telegram://redacted/{file_name}"
 
     def _discover_related_notes(
         self,

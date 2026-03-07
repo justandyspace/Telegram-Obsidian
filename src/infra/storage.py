@@ -673,7 +673,7 @@ class StateStore:
         conn = self._connect()
         row = conn.execute("PRAGMA integrity_check").fetchone()
         if row is None:
-            return False, "integrity_check returned no rows"
+            return False, "integrity_check returned no rows"  # pragma: no cover
         result = str(row[0] if isinstance(row, tuple) else row["integrity_check"])
         if result.strip().lower() != "ok":
             return False, result

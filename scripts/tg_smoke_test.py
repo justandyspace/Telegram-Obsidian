@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Telegram end-to-end smoke test using a real user session.
 
 Usage:
@@ -7,6 +8,8 @@ Optional:
   TG_SESSION=/path/to/session
   TG_TIMEOUT_SECONDS=25
   TG_COMMANDS="/start|/status|/delete cancel"
+  TG_AUTH_MODE="request-code" | "complete-login" | "status" | "run"
+  TG_LOGIN_METHOD="qr"
 """
 
 from __future__ import annotations
@@ -14,14 +17,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
 import time
 import urllib.request
 from pathlib import Path
 
+import qrcode
+import qrcode.image.svg
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
-import qrcode
 
 
 def _require_env(name: str) -> str:
@@ -91,11 +94,13 @@ async def main() -> int:
     login_code = (os.getenv("TG_LOGIN_CODE") or "").strip()
     twofa_password = (os.getenv("TG_2FA_PASSWORD") or "").strip()
     login_method = (os.getenv("TG_LOGIN_METHOD") or "").strip().lower()
-    auth_mode = (os.getenv("TG_AUTH_MODE") or "").strip().lower()
+    auth_mode = (os.getenv("TG_AUTH_MODE") or "run").strip().lower()
 
-    session_path = Path(
-        (os.getenv("TG_SESSION") or str(Path.home() / ".telegram-smoke" / "session")).strip()
-    )
+    # Use project-local session folder to avoid permission issues
+    default_session = Path(__file__).resolve().parents[1] / ".sessions" / "session"
+    session_path = Path(os.getenv("TG_SESSION", str(default_session)).strip())
+
+    # CRITICAL FIX: Ensure parent directory exists!
     session_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -105,22 +110,58 @@ async def main() -> int:
 
     print(f"Session file: {session_path}")
     print(f"Target bot: @{bot_username}")
-    print(f"Commands: {commands}")
+    if auth_mode == "run":
+        print(f"Commands: {commands}")
     print()
 
     client = TelegramClient(str(session_path), api_id, api_hash)
     auth_meta_path = session_path.with_suffix(".auth.json")
 
+    if auth_mode == "status":
+        await client.connect()
+        try:
+            authorized = await client.is_user_authorized()
+            if authorized:
+                me = await client.get_me()
+                display = (getattr(me, 'username', '') or getattr(me, 'id', 'unknown')) if me else "unknown"
+                print(f"[STATUS] AUTHORIZED as {display}")
+                return 0
+            print("[STATUS] NOT AUTHORIZED")
+            return 1
+        finally:
+            await client.disconnect()
+
     if auth_mode == "request-code":
         await client.connect()
-        sent = await client.send_code_request(phone)
-        auth_meta_path.write_text(
-            json.dumps({"phone": phone, "phone_code_hash": sent.phone_code_hash}, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        await client.disconnect()
-        print("Code requested. Send the code here and I will complete login.")
-        return 0
+        try:
+            print(f"Requesting login code for phone: {phone}")
+            sent = await client.send_code_request(phone)
+
+            code_type_name = type(sent.type).__name__
+            timeout_val = getattr(sent.type, 'timeout', None)
+            next_type_obj = getattr(sent, 'next_type', None)
+            next_type_name = type(next_type_obj).__name__ if next_type_obj else "None"
+
+            print("\n--- Code Sent Info ---")
+            print(f"Type: {code_type_name}")
+            print(f"Timeout: {timeout_val} seconds")
+            print(f"Next Type (Fallback): {next_type_name}")
+            print("----------------------\n")
+
+            if "App" in code_type_name:
+                print(">>> WARNING: The code was sent to your existing Telegram App (mobile/desktop).")
+                print(">>> It did NOT arrive via SMS.")
+            elif "Sms" in code_type_name:
+                print(">>> The code was sent via SMS.")
+
+            auth_meta_path.write_text(
+                json.dumps({"phone": phone, "phone_code_hash": sent.phone_code_hash}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            print("\nNext step: Provide the code via TG_LOGIN_CODE=... and TG_AUTH_MODE=complete-login")
+            return 0
+        finally:
+            await client.disconnect()
 
     if auth_mode == "complete-login":
         if not auth_meta_path.exists():
@@ -136,39 +177,65 @@ async def main() -> int:
                     code=login_code,
                     phone_code_hash=str(meta["phone_code_hash"]),
                 )
-            except SessionPasswordNeededError:
+            except SessionPasswordNeededError as exc:
                 if not twofa_password:
-                    raise SystemExit("2FA password required. Set TG_2FA_PASSWORD.")
+                    raise SystemExit("2FA password required. Set TG_2FA_PASSWORD.") from exc
                 await client.sign_in(password=twofa_password)
             if not await client.is_user_authorized():
                 raise SystemExit("Login failed: session is not authorized.")
         finally:
             await client.disconnect()
-        print("Login completed and session saved.")
+        print("Login completed successfully. Session saved.")
         return 0
+
     if login_method == "qr":
         await client.connect()
         if not await client.is_user_authorized():
-            qr_login = await client.qr_login()
+            try:
+                qr_login = await client.qr_login()
+            except SessionPasswordNeededError as exc:
+                if not twofa_password:
+                    raise SystemExit(
+                        "2FA password required to start QR login. Set TG_2FA_PASSWORD."
+                    ) from exc
+                await client.sign_in(password=twofa_password)
+                qr_login = await client.qr_login()
+
             print("Scan this QR in Telegram app: Settings -> Devices -> Link Desktop Device")
             print()
             qr = qrcode.QRCode(border=1)
             qr.add_data(qr_login.url)
             qr.make(fit=True)
+            qr_svg_path = Path(
+                os.getenv("TG_QR_SVG_PATH") or session_path.parent / "telegram-login-qr.svg"
+            )
+            qr_svg_path.parent.mkdir(parents=True, exist_ok=True)
+            qr.make_image(image_factory=qrcode.image.svg.SvgPathImage).save(str(qr_svg_path))
+            print(f"QR SVG saved to: {qr_svg_path}")
+            print("QR URL saved in-session for 120 seconds.")
+            print()
             qr.print_ascii(invert=True)
             print()
-            await qr_login.wait(timeout=120)
-    elif login_code:
-        await client.start(
-            phone=phone,
-            code_callback=lambda: login_code,
-            password=twofa_password or None,
-        )
-    else:
+            try:
+                await qr_login.wait(timeout=120)
+            except SessionPasswordNeededError as exc:
+                if not twofa_password:
+                    raise SystemExit("2FA password required for QR login. Set TG_2FA_PASSWORD.") from exc
+                await client.sign_in(password=twofa_password)
+
+            if not await client.is_user_authorized():
+                raise SystemExit("QR Login failed: session is still not authorized.")
+            print("QR Login successful.")
+
+    # Mode: "run" (default) or any unknown fallback
+    # Check authorization first to avoid hanging on input() in CI
+    await client.connect()
+    if not await client.is_user_authorized():
+        print("[WARN] Session not authorized. Proceeding with interactive client.start()...")
         await client.start(phone=phone)
 
     me = await client.get_me()
-    display = (me.username or f"id={me.id}") if me else "unknown"
+    display = (getattr(me, 'username', '') or getattr(me, 'id', 'unknown')) if me else "unknown"
     print(f"Authorized as: {display}")
     print()
 
@@ -199,4 +266,4 @@ if __name__ == "__main__":
         raise SystemExit(asyncio.run(main()))
     except KeyboardInterrupt:
         print("\nInterrupted.")
-        raise SystemExit(130)
+        raise SystemExit(130) from None

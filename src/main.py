@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Callable
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -12,6 +13,7 @@ from aiohttp import web
 
 from src.bot.telegram_router import build_router
 from src.config import AppConfig, load_config
+from src.infra.gdrive import build_gdrive_client, run_gdrive_maintenance_forever
 from src.infra.health import HealthServer
 from src.infra.logging import configure_logging, get_logger
 from src.infra.runtime_state import record_error
@@ -39,6 +41,7 @@ def _build_dispatcher(config: AppConfig, store: StateStore, rag_manager: RagMana
             vault_path=config.vault_path,
             rag_manager=rag_manager,
             ai_service=ai_service,
+            mini_app_base_url=config.mini_app_base_url,
         )
     )
     return dp
@@ -65,7 +68,7 @@ async def _run_polling_forever(
             record_error(f"polling crash: {exc}")
             LOGGER.exception("Polling crashed, retrying in %s sec: %s", backoff, exc)
             await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 30)
+            backoff = min(backoff * 2, 30)  # pragma: no cover
         finally:
             await bot.session.close()
 
@@ -120,7 +123,7 @@ async def _run_webhook_forever(
                 raise
             LOGGER.exception("Webhook crashed, retrying in %s sec: %s", backoff, exc)
             await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 30)
+            backoff = min(backoff * 2, 30)  # pragma: no cover
         finally:
             try:
                 await bot.delete_webhook(drop_pending_updates=False)
@@ -151,7 +154,7 @@ async def _run_bot_loop(config: AppConfig, store: StateStore, rag_manager: RagMa
         mode = config.telegram_mode
         if mode == "polling":
             await _run_polling_forever(config, store, rag_manager, set_ready)
-            return
+            return  # pragma: no cover
         if mode == "webhook":
             await _run_webhook_forever(
                 config,
@@ -160,7 +163,7 @@ async def _run_bot_loop(config: AppConfig, store: StateStore, rag_manager: RagMa
                 set_ready,
                 retry_forever=True,
             )
-            return
+            return  # pragma: no cover
 
         # auto mode
         if config.webhook_base_url:
@@ -172,7 +175,7 @@ async def _run_bot_loop(config: AppConfig, store: StateStore, rag_manager: RagMa
                     set_ready,
                     retry_forever=False,
                 )
-                return
+                return  # pragma: no cover
             except Exception as exc:  # noqa: BLE001
                 LOGGER.exception("Webhook mode unavailable in auto mode, switching to polling: %s", exc)
 
@@ -183,6 +186,7 @@ async def _run_bot_loop(config: AppConfig, store: StateStore, rag_manager: RagMa
 
 async def _run_worker_loop(config: AppConfig, store: StateStore, rag_manager: RagManager) -> None:
     ready = True
+    drive_client = build_gdrive_client(config)
 
     def is_ready() -> bool:
         return ready
@@ -190,13 +194,20 @@ async def _run_worker_loop(config: AppConfig, store: StateStore, rag_manager: Ra
     health = HealthServer("0.0.0.0", config.worker_health_port, is_ready)
     await health.start()
     LOGGER.info("Worker health server listening on %s", config.worker_health_port)
+    maintenance_task = None
+    if drive_client is not None:
+        maintenance_task = asyncio.create_task(run_gdrive_maintenance_forever(config, drive_client))
     try:
         try:
-            await run_worker(config, store, rag_manager)
+            await run_worker(config, store, rag_manager, drive_client=drive_client)
         except Exception as exc:  # noqa: BLE001
             record_error(f"worker crash: {exc}")
             raise
     finally:
+        if maintenance_task is not None:
+            maintenance_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await maintenance_task
         ready = False
         await health.stop()
 
@@ -259,5 +270,5 @@ def main() -> None:
     asyncio.run(_async_main(args.role))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

@@ -1,19 +1,30 @@
-import json, time, logging, requests, hashlib
+"""CouchDB bridge for pushing rendered notes into LiveSync-compatible docs."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import time
 from urllib.parse import quote
+
+import requests
 
 LOGGER = logging.getLogger(__name__)
 
 
 class CouchDBBridge:
-    def __init__(self, url, user, password, db_name):
+    """Pushes note and chunk documents to CouchDB."""
+
+    def __init__(self, url: str, user: str, password: str, db_name: str) -> None:
         self.url, self.db_name = url.rstrip("/"), db_name
         self.session = requests.Session()
         self.session.auth = (user, password)
 
-    def push_note(self, file_name, content):
+    def push_note(self, file_name: str, content: str) -> bool:
         note_id = file_name
         now_ms = int(time.time() * 1000)
-        chunk_id = "h:" + hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
+        chunk_id = "h:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
 
         chunk_doc = {"_id": chunk_id, "type": "leaf", "data": content}
         note_doc = {
@@ -50,6 +61,6 @@ class CouchDBBridge:
                 headers={"Content-Type": "application/json"},
             )
             return res_note.status_code in (201, 202)
-        except Exception as e:
-            LOGGER.error(f"CouchDB push error: {e}")
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("CouchDB push error for %s: %s", file_name, exc)
             return False

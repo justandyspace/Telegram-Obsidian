@@ -8,10 +8,12 @@ from typing import Any
 from google import genai
 from google.genai import types
 
+from src.infra.ai_fallback import is_remote_ai_available, mark_remote_ai_failure, reset_remote_ai
 from src.infra.logging import get_logger
 from src.infra.resilience import RetryPolicy, with_retry
 
 LOGGER = get_logger(__name__)
+_AI_SCOPE = "payload_enrichment"
 
 _BASE_PROMPT = (
     "Проанализируй текст и верни JSON с полями: "
@@ -47,6 +49,11 @@ def enrich_payload_with_ai(
         if existing_summary:
             merged["ai_summary"] = existing_summary
         return merged
+    if not is_remote_ai_available(_AI_SCOPE):
+        merged["auto_tags"] = existing_tags
+        if existing_summary:
+            merged["ai_summary"] = existing_summary
+        return merged
 
     actions = merged.get("actions", [])
     needs_translation = "translate" in actions
@@ -71,6 +78,7 @@ def enrich_payload_with_ai(
             
         policy = RetryPolicy(max_attempts=4, base_delay_seconds=2.0, max_delay_seconds=15.0)
         response = with_retry(policy, _call_gemini, exc_types=(Exception,))
+        reset_remote_ai(_AI_SCOPE)
         
         ai_tags, ai_summary, translation = _parse_ai_response(response.text)
         merged["auto_tags"] = _merge_tags(existing_tags, ai_tags)
@@ -83,6 +91,7 @@ def enrich_payload_with_ai(
         if translation:
             merged["translation"] = translation
     except Exception as exc:  # noqa: BLE001
+        mark_remote_ai_failure(_AI_SCOPE, exc)
         LOGGER.warning("AI enrichment skipped due to error: %s", exc)
         merged["auto_tags"] = existing_tags
         if existing_summary:

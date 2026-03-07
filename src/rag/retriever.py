@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from google import genai
 
+from src.infra.ai_fallback import is_remote_ai_available, mark_remote_ai_failure, reset_remote_ai
 from src.infra.logging import get_logger
 from src.infra.resilience import RetryPolicy, with_retry
 from src.infra.tenancy import tenant_index_dir, tenant_vault_path
@@ -17,6 +19,15 @@ from src.rag.embedder import BaseEmbedder, build_embedder
 from src.rag.index_store import IndexStore, RetrievedChunk
 
 LOGGER = get_logger(__name__)
+_AI_SCOPE = "grounded_answer"
+_MANAGED_BLOCK_RE = re.compile(r"<!--\s*BOT_[A-Z_]+:START\s*-->.*?<!--\s*BOT_[A-Z_]+:END\s*-->", re.DOTALL)
+_INLINE_META_RE = re.compile(
+    r"\b(note_id|source_chat_id|source_message_id|source_user_id|source_datetime|actions|tags)\s*:\s*[^\n]+",
+    re.IGNORECASE,
+)
+_PROCESSED_RE = re.compile(r"\[\s*Processed in[^\]]*\]", re.IGNORECASE)
+_RELATED_NOTES_RE = re.compile(r"#+\s*Related notes \(auto\).*", re.IGNORECASE | re.DOTALL)
+_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
 
 
 @dataclass
@@ -105,7 +116,16 @@ class RagService:
         provider = self.provider_name
         hash_mode = provider == "hash-fallback" or provider.endswith("->hash-fallback")
         min_score = -1.0 if hash_mode else 0.35
-        hits = [item for item in raw_hits if item.score >= min_score]
+        hits: list[RetrievedChunk] = []
+        for item in raw_hits:
+            if item.score < min_score:
+                continue
+            note_path = Path(item.note_path)
+            if not note_path.exists():
+                # Opportunistically prune stale index entries for deleted notes.
+                self._index_store.delete_document(item.note_path)
+                continue
+            hits.append(item)
         return hits[:top_k]
 
     def answer(self, question: str, top_k: int = 4) -> QueryAnswer:
@@ -126,7 +146,10 @@ class RagService:
         return QueryAnswer(answer=extractive, sources=hits, mode="extractive")
 
     def _answer_with_gemini(self, question: str, hits: list[RetrievedChunk]) -> str:
-        if self._generation_client is None:
+        client = self._generation_client
+        if client is None:
+            return ""
+        if not is_remote_ai_available(_AI_SCOPE):
             return ""
         try:
             context_lines = []
@@ -134,24 +157,28 @@ class RagService:
                 context_lines.append(f"[{idx}] {hit.file_name}\n{hit.chunk_text}")
             prompt = (
                 "Answer the user's question using ONLY the provided context.\n"
+                "Write in natural human language, not as raw notes or debug output.\n"
+                "Do not paste markdown structure, metadata blocks, or filenames inline unless needed as sources.\n"
                 "Be concise and factual. If context is insufficient, say so.\n\n"
                 f"Question: {question}\n\n"
                 "Context:\n"
                 + "\n\n".join(context_lines)
             )
-            
+
             def _call_gemini() -> Any:
-                return self._generation_client.models.generate_content(
+                return client.models.generate_content(
                     model=self._generation_model,
                     contents=prompt,
                 )
-            
+
             policy = RetryPolicy(max_attempts=3, base_delay_seconds=1.5, max_delay_seconds=10.0)
             result = with_retry(policy, _call_gemini, exc_types=(Exception,))
-            
-            text = (result.text or "").strip()
+            reset_remote_ai(_AI_SCOPE)
+
+            text = str(cast(Any, result).text or "").strip()
             return text[:2500]
         except Exception as exc:  # noqa: BLE001
+            mark_remote_ai_failure(_AI_SCOPE, exc)
             LOGGER.warning("Gemini grounded answer failed: %s", exc)
             return ""
 
@@ -205,12 +232,37 @@ class RagManager:
 
 
 def _build_extractive_answer(question: str, hits: list[RetrievedChunk]) -> str:
-    lines = [f"Q: {question}", "", "Grounded findings:"]
+    lines = ["Вот что удалось найти по запросу:", ""]
     for idx, hit in enumerate(hits, start=1):
-        snippet = " ".join(hit.chunk_text.split())[:280]
-        lines.append(f"{idx}. [{hit.file_name}] {snippet}")
+        snippet = _humanize_chunk_text(hit.chunk_text)
+        if not snippet:
+            snippet = hit.file_name.rsplit(".", 1)[0]
+        if len(snippet) > 220:
+            snippet = snippet[:217].rstrip() + "..."
+        lines.append(f"{idx}. {snippet}")
     return "\n".join(lines)
 
 
 def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _humanize_chunk_text(text: str) -> str:
+    cleaned = str(text or "").replace("\r\n", "\n")
+    cleaned = _MANAGED_BLOCK_RE.sub(" ", cleaned)
+    cleaned = _RELATED_NOTES_RE.sub(" ", cleaned)
+    cleaned = cleaned.replace("## 📝 User Content", " ")
+    cleaned = cleaned.replace("User Content", " ")
+    cleaned = cleaned.replace("##", " ")
+    cleaned = _INLINE_META_RE.sub(" ", cleaned)
+    cleaned = _PROCESSED_RE.sub(" ", cleaned)
+    cleaned = cleaned.replace("[[", "").replace("]]", "")
+    cleaned = _HEADING_RE.sub("", cleaned)
+    cleaned = " ".join(cleaned.split())
+    cleaned = cleaned.strip(" -:#>|")
+    words = cleaned.split()
+    if len(words) >= 8 and len(words) % 2 == 0:
+        half = len(words) // 2
+        if words[:half] == words[half:]:
+            cleaned = " ".join(words[:half])
+    return cleaned

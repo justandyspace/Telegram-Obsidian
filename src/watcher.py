@@ -12,6 +12,12 @@ from src.rag.retriever import RagManager
 LOGGER = get_logger(__name__)
 
 
+def _event_path(value: str | bytes) -> Path | None:
+    if isinstance(value, bytes):
+        return None
+    return Path(value)
+
+
 class NoteEventProcessor:
     def __init__(self, *, base_vault_path: Path, rag_manager: RagManager, multi_tenant: bool) -> None:
         self._base_vault_path = base_vault_path.resolve()
@@ -94,23 +100,32 @@ async def _run_watchdog_loop(config: AppConfig, processor: NoteEventProcessor) -
     class _VaultEventHandler(FileSystemEventHandler):
         def on_created(self, event: FileSystemEvent) -> None:
             if not event.is_directory:
-                processor.handle_upsert(Path(event.src_path))
+                src_path = _event_path(event.src_path)
+                if src_path is not None:
+                    processor.handle_upsert(src_path)
 
         def on_modified(self, event: FileSystemEvent) -> None:
             if not event.is_directory:
-                processor.handle_upsert(Path(event.src_path))
+                src_path = _event_path(event.src_path)
+                if src_path is not None:
+                    processor.handle_upsert(src_path)
 
         def on_deleted(self, event: FileSystemEvent) -> None:
             if not event.is_directory:
-                processor.handle_delete(Path(event.src_path))
+                src_path = _event_path(event.src_path)
+                if src_path is not None:
+                    processor.handle_delete(src_path)
 
         def on_moved(self, event: FileSystemEvent) -> None:
             if event.is_directory:
-                return
-            processor.handle_delete(Path(event.src_path))
+                return  # pragma: no cover
+            src_path = _event_path(event.src_path)
+            if src_path is not None:
+                processor.handle_delete(src_path)
             dest_path = getattr(event, "dest_path", "")
-            if dest_path:
-                processor.handle_upsert(Path(dest_path))
+            resolved_dest = _event_path(dest_path)
+            if resolved_dest is not None:
+                processor.handle_upsert(resolved_dest)
 
     observer = Observer()
     handler = _VaultEventHandler()

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from google import genai
 from google.genai import types
 
+from src.infra.ai_fallback import is_remote_ai_available, mark_remote_ai_failure, reset_remote_ai
 from src.infra.logging import get_logger
 from src.infra.resilience import RetryPolicy, async_with_retry
 
 LOGGER = get_logger(__name__)
+_AI_SCOPE = "assistant_reply"
 
 # --- SYSTEM PROMPT ---
 DEFAULT_ASSISTANT_PROMPT = (
@@ -25,9 +27,15 @@ DEFAULT_ASSISTANT_PROMPT = (
 )
 
 class AIService:
-    def __init__(self, api_key: str, model_name: str, system_instruction: str = DEFAULT_ASSISTANT_PROMPT):
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str,
+        system_instruction: str = DEFAULT_ASSISTANT_PROMPT,
+    ) -> None:
         self.model_name = model_name
         self.system_instruction = system_instruction
+        self.client: genai.Client | None
         if not api_key:
             LOGGER.warning("GEMINI_API_KEY is missing. AI assistant will be disabled.")
             self.client = None
@@ -36,25 +44,31 @@ class AIService:
 
     async def generate_reply(self, user_text: str, context_info: str = "") -> str:
         """Generates a human-friendly reply for the user."""
-        if not self.client:
+        client = self.client
+        if client is None:
             return "Принято. (AI ассистент не настроен)"
+        if not is_remote_ai_available(_AI_SCOPE):
+            return "Принято. Сохраняю в Obsidian..."
 
         try:
             prompt = f"Пользователь прислал: {user_text}\n\nКонтекст обработки: {context_info}"
-            
+
             async def _call_gemini() -> Any:
-                return await self.client.aio.models.generate_content(
+                return await client.aio.models.generate_content(
                     model=self.model_name,
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=self.system_instruction,
                     )
                 )
-                
+
             policy = RetryPolicy(max_attempts=3, base_delay_seconds=1.5, max_delay_seconds=10.0)
             response = await async_with_retry(policy, _call_gemini, exc_types=(Exception,))
-            
-            return response.text.strip()
+            reset_remote_ai(_AI_SCOPE)
+
+            text = str(cast(Any, response).text or "").strip()
+            return text or "Принято. Сохраняю в Obsidian..."
         except Exception as exc:
+            mark_remote_ai_failure(_AI_SCOPE, exc)
             LOGGER.exception("Failed to generate AI reply")
-            return f"Принято. Сохраняю в Obsidian... (ошибка AI: {str(exc)})"
+            return "Принято. Сохраняю в Obsidian..."

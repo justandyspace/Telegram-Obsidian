@@ -14,7 +14,11 @@ from aiogram.types import Message
 
 from src.bot.auth import build_tenant_context, is_authorized_user
 from src.bot.commands import build_command_router
+from src.bot.keyboards import build_quick_actions_keyboard
 from src.infra.logging import get_logger
+from src.infra.runtime_state import last_error, uptime_human
+from src.infra.telemetry import track_event
+from src.obsidian.search import latest_notes
 from src.pipeline.ai_service import AIService
 from src.pipeline.ingest import IngestRequest
 from src.pipeline.jobs import JobService
@@ -31,9 +35,135 @@ def build_router(
     vault_path,
     rag_manager: RagManager,
     ai_service: AIService,
+    mini_app_base_url: str = "",
+    **_compat_kwargs,
 ) -> Router:
     router = Router(name="telegram")
-    router.include_router(build_command_router(store, allowed_user_ids, vault_path, rag_manager))
+    router.include_router(
+        build_command_router(
+            store,
+            allowed_user_ids,
+            vault_path,
+            rag_manager,
+            mini_app_base_url=mini_app_base_url,
+        )
+    )
+
+    @router.message((F.text == "⚙️ Управление") | (F.text == "📊 Статус"))
+    async def quick_status_button_handler(message: Message) -> None:
+        from_user = message.from_user.id if message.from_user else None
+        if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
+            if message.chat.type == "private":
+                await message.answer("Access denied: this Telegram user is not in allowlist.")
+            return
+        if message.text == "⚙️ Управление":
+            await message.answer(
+                "⚙️ <b>Управление</b>\n\n"
+                "Здесь всё служебное:\n"
+                "• <code>/status</code> для состояния очереди и индекса\n"
+                "• <code>/delete имя_файла.md</code> для удаления одной заметки\n"
+                "• <code>/delete cancel</code> для отмены массового удаления",
+                parse_mode="HTML",
+                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+            )
+            return
+        if from_user is None:
+            await message.answer("Unsupported message source.")
+            return
+
+        tenant = build_tenant_context(from_user)
+        rag = rag_manager.for_tenant(tenant.tenant_id)
+        counts = store.status_counts(tenant_id=tenant.tenant_id)
+        integrity_ok, _ = store.integrity_check()
+        err_text, _ = last_error()
+        rag_stats = rag.stats()
+        lines = ["📊 <b>Короткая сводка</b>", "────────────"]
+        if counts:
+            for key, value in sorted(counts.items(), key=lambda item: item[0]):
+                lines.append(f"• {key}: <b>{value}</b>")
+        else:
+            lines.append("• Очередь пуста")
+        lines.append(f"• Индекс: <b>{rag_stats['documents']}</b> заметок / <b>{rag_stats['chunks']}</b> фрагментов")
+        lines.append(f"• Хранилище: {'✅ OK' if integrity_ok else '❌ требует внимания'}")
+        lines.append(f"• Аптайм: <code>{uptime_human()}</code>")
+        lines.append(f"• Runtime: <code>{(err_text or 'без ошибок')[:80]}</code>" if err_text else "• Runtime: <b>без ошибок</b>")
+        await message.answer(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+        )
+
+    @router.message((F.text == "➕ Добавить") | (F.text == "🕘 Последние"))
+    async def quick_latest_button_handler(message: Message) -> None:
+        from_user = message.from_user.id if message.from_user else None
+        if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
+            if message.chat.type == "private":
+                await message.answer("Access denied: this Telegram user is not in allowlist.")
+            return
+        if message.text == "➕ Добавить":
+            await message.answer(
+                "➕ <b>Добавить</b>\n\n"
+                "Просто отправь сюда:\n"
+                "• текст или идею\n"
+                "• ссылку\n"
+                "• голосовое\n"
+                "• фото или документ\n\n"
+                "Если нужно, можешь дописать теги вроде <code>#save</code> или <code>#summary</code>.",
+                parse_mode="HTML",
+                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+            )
+            return
+        if from_user is None:
+            await message.answer("Unsupported message source.")
+            return
+
+        tenant = build_tenant_context(from_user)
+        recent = latest_notes(rag_manager.for_tenant(tenant.tenant_id).vault_path, limit=5)
+        if not recent:
+            await message.answer("📭 База знаний пока пуста.", parse_mode="HTML", reply_markup=build_quick_actions_keyboard(mini_app_base_url))
+            return
+        lines = ["🕘 <b>Последние заметки</b>", "", "────────────"]
+        for idx, item in enumerate(recent, start=1):
+            lines.append(f"<b>{idx}.</b> <code>{item['file_name']}</code>")
+            lines.append(f"💬 <i>{item['snippet']}</i>")
+            lines.append("")
+        await message.answer(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+        )
+
+    @router.message((F.text == "🔎 Найти") | (F.text == "🔎 Поиск"))
+    async def quick_search_button_handler(message: Message) -> None:
+        from_user = message.from_user.id if message.from_user else None
+        if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
+            if message.chat.type == "private":
+                await message.answer("Access denied: this Telegram user is not in allowlist.")
+            return
+        await message.answer(
+            "🔎 <b>Найти и Поиск</b>\n\n"
+            "Что можно сделать:\n"
+            "• <code>/find запрос</code> для быстрого поиска\n"
+            "• <code>/summary вопрос</code> для ответа по базе\n"
+            "• кнопка <b>📲 База</b> для полного поиска и просмотра заметок",
+            parse_mode="HTML",
+            reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+        )
+
+    @router.message(F.text == "🗑 Удаление")
+    async def quick_delete_button_handler(message: Message) -> None:
+        from_user = message.from_user.id if message.from_user else None
+        if not is_authorized_user(incoming_user_id=from_user, allowed_user_ids=allowed_user_ids):
+            if message.chat.type == "private":
+                await message.answer("Access denied: this Telegram user is not in allowlist.")
+            return
+        await message.answer(
+            "🗑 <b>Удаление</b>\n\n"
+            "Отмена массового удаления: <code>/delete cancel</code>\n"
+            "Удаление одной заметки: <code>/delete имя_файла.md</code>",
+            parse_mode="HTML",
+            reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+        )
 
     async def _submit_media_ingest(message: Message, *, from_user: int) -> None:
         media_url = await _extract_telegram_media_url(message)
@@ -65,22 +195,34 @@ def build_router(
         )
 
         result = job_service.submit(ingest_request)
+        track_event(
+            "capture_voice_submitted",
+            tenant_id=tenant.tenant_id,
+            user_id=tenant.user_id,
+            is_new=result.is_new,
+            action_count=len(result.actions),
+        )
         if result.is_new:
+            bot = message.bot
             await message.answer(
                 "🎙 <b>Принято!</b>\n\n"
                 "Понял, сохраняю голосовое сообщение.\n"
                 "Начинаю его транскрипцию.",
                 parse_mode="HTML",
+                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
             )
-            asyncio.create_task(
-                _watch_job_and_notify(
-                    bot=message.bot,
-                    store=store,
-                    tenant_id=tenant.tenant_id,
-                    job_id=result.job_id,
-                    chat_id=message.chat.id,
+            if bot is not None:
+                asyncio.create_task(
+                    _watch_job_and_notify(
+                        bot=bot,
+                        store=store,
+                        tenant_id=tenant.tenant_id,
+                        job_id=result.job_id,
+                        chat_id=message.chat.id,
+                        base_vault_path=Path(vault_path),
+                        mini_app_base_url=mini_app_base_url,
+                    )
                 )
-            )
             return
 
         await message.answer("Я уже обрабатываю эту информацию. Дубликат пропущен.")
@@ -125,10 +267,34 @@ def build_router(
         )
 
         result = job_service.submit(ingest_request)
+        track_event(
+            "capture_text_submitted",
+            tenant_id=tenant.tenant_id,
+            user_id=tenant.user_id,
+            is_new=result.is_new,
+            action_count=len(result.actions),
+        )
         if result.is_new:
             context = f"Действия: {', '.join(sorted(result.actions))}"
             reply_text = await ai_service.generate_reply(raw_text, context_info=context)
-            await message.answer(reply_text)
+            await message.answer(
+                f"{reply_text}\n\n"
+                "Когда заметка будет готова, я пришлю отдельное сообщение с папкой и названием файла.",
+                reply_markup=build_quick_actions_keyboard(mini_app_base_url),
+            )
+            bot = message.bot
+            if bot is not None:
+                asyncio.create_task(
+                    _watch_job_and_notify(
+                        bot=bot,
+                        store=store,
+                        tenant_id=tenant.tenant_id,
+                        job_id=result.job_id,
+                        chat_id=message.chat.id,
+                        base_vault_path=Path(vault_path),
+                        mini_app_base_url=mini_app_base_url,
+                    )
+                )
             return
 
         await message.answer("Я уже обрабатываю эту информацию. Дубликат пропущен.")
@@ -211,13 +377,16 @@ async def _watch_job_and_notify(
     chat_id: int,
     timeout_seconds: int = 180,
     poll_seconds: float = 2.0,
+    base_vault_path: Path | None = None,
+    mini_app_base_url: str = "",
 ) -> None:
+    quick_actions = build_quick_actions_keyboard(mini_app_base_url)
     elapsed = 0.0
     while elapsed < timeout_seconds:
         try:
             await bot.send_chat_action(chat_id=chat_id, action="typing")
         except Exception:  # noqa: BLE001
-            pass
+            LOGGER.debug("Failed to send typing action for transcription status update", exc_info=True)
 
         status_row = store.get_job_status(job_id, tenant_id=tenant_id)
         if status_row is None:
@@ -237,20 +406,28 @@ async def _watch_job_and_notify(
             if note_path:
                 note_name = Path(note_path).name
                 display_name = _display_note_name(note_name)
+                folder_name, relative_note_path = _humanize_note_destination(
+                    note_path=Path(note_path),
+                    base_vault_path=base_vault_path,
+                )
                 await bot.send_message(
                     chat_id=chat_id,
                     text=(
                         "✅ <b>Готово!</b>\n\n"
-                        "Транскрипция завершена и сохранена в Obsidian.\n"
-                        f"📝 <b>Заметка:</b> <code>{display_name}</code>"
+                        "Материал обработан и сохранён в Obsidian.\n"
+                        f"📝 <b>Заметка:</b> <code>{display_name}</code>\n"
+                        f"📁 <b>Папка:</b> <code>{folder_name}</code>\n"
+                        f"📍 <b>Путь:</b> <code>{relative_note_path}</code>"
                     ),
                     parse_mode="HTML",
+                    reply_markup=quick_actions,
                 )
             else:
                 await bot.send_message(
                     chat_id=chat_id,
-                    text="✅ <b>Готово!</b>\n\nТранскрипция завершена и сохранена в Obsidian.",
+                    text="✅ <b>Готово!</b>\n\nМатериал обработан и сохранён в Obsidian.",
                     parse_mode="HTML",
+                    reply_markup=quick_actions,
                 )
             return
         if status == "failed":
@@ -258,10 +435,11 @@ async def _watch_job_and_notify(
             await bot.send_message(
                 chat_id=chat_id,
                 text=(
-                    "❌ <b>Транскрипция не завершена</b>\n\n"
+                    "❌ <b>Обработка не завершена</b>\n\n"
                     f"Причина: <code>{error[:300]}</code>"
                 ),
                 parse_mode="HTML",
+                reply_markup=quick_actions,
             )
             return
 
@@ -271,10 +449,11 @@ async def _watch_job_and_notify(
     await bot.send_message(
         chat_id=chat_id,
         text=(
-            "⏳ <b>Все еще обрабатываю голосовое</b>\n\n"
+            "⏳ <b>Материал всё ещё обрабатывается</b>\n\n"
             "Задача пока в очереди. Проверь <code>/status</code> чуть позже."
         ),
         parse_mode="HTML",
+        reply_markup=quick_actions,
     )
 
 
@@ -292,6 +471,20 @@ def _display_note_name(file_name: str) -> str:
     if match:
         return match.group(1).strip()[:80]
     return stem[:80]
+
+
+def _humanize_note_destination(*, note_path: Path, base_vault_path: Path | None) -> tuple[str, str]:
+    resolved_note = note_path.resolve()
+    if base_vault_path is not None:
+        try:
+            relative = resolved_note.relative_to(base_vault_path.resolve())
+            folder = relative.parent.as_posix() if relative.parent.as_posix() != "." else "корень vault"
+            return folder, relative.as_posix()
+        except ValueError:
+            pass
+    folder = resolved_note.parent.name or "корень vault"
+    return folder, resolved_note.name
+
 
 def _extract_forward_source(message: Message) -> str | None:
     if not hasattr(message, "forward_origin") or not message.forward_origin:

@@ -13,9 +13,9 @@ from src.infra.storage import StateStore
 class CommandsSmokeTests(unittest.TestCase):
     def test_start_message_uses_assistant_style(self) -> None:
         source = inspect.getsource(commands_module.build_command_router)
-        self.assertIn("🤖 <b>Привет. Я готов помогать с твоим Obsidian.</b>", source)
-        self.assertIn("🧭 <b>Команды:</b>", source)
-        self.assertIn("<code>/delete cancel</code>", source)
+        self.assertIn("🤖 <b>Привет. Это твой быстрый inbox для знаний.</b>", source)
+        self.assertIn("⚡ <b>Что можно сделать прямо сейчас</b>", source)
+        self.assertIn("Mini App нужен для полного поиска", source)
 
     def test_delete_flow_uses_confirmation_methods(self) -> None:
         source = inspect.getsource(commands_module.build_command_router)
@@ -32,9 +32,9 @@ class CommandsSmokeTests(unittest.TestCase):
 
     def test_status_contains_monitoring_fields(self) -> None:
         source = inspect.getsource(commands_module.build_command_router)
-        self.assertIn("🩺 <b>Мониторинг процесса</b>", source)
+        self.assertIn("📊 <b>Короткая сводка</b>", source)
         self.assertIn("Аптайм", source)
-        self.assertIn("Последняя ошибка", source)
+        self.assertIn("Runtime", source)
 
 
 class StorageMethodSurfaceTests(unittest.TestCase):

@@ -5,18 +5,23 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
 from src.bot.auth import build_tenant_context, is_authorized_user
+from src.bot.keyboards import build_quick_actions_keyboard
+from src.bot.miniapp import build_mini_app_markup
 from src.infra.logging import get_logger
-from src.infra.runtime_state import last_error, started_at_iso, uptime_human
+from src.infra.runtime_state import last_error, uptime_human
 from src.infra.storage import StateStore
+from src.infra.telemetry import track_event
 from src.obsidian.search import find_notes, latest_notes
-from src.rag.retriever import RagManager
+from src.rag.retriever import _humanize_chunk_text
 
 DELETE_ALL_CONFIRM_TTL_SECONDS = 120
+SUMMARY_MAX_QUERY_CHARS = 1000
+SUMMARY_MAX_QUERY_WORDS = 120
 CARD_DIVIDER = "────────────"
 LOGGER = get_logger(__name__)
 
@@ -24,9 +29,21 @@ LOGGER = get_logger(__name__)
 def build_command_router(
     store: StateStore,
     allowed_user_ids: set[int],
-    vault_path: Path,  # kept for API compatibility with existing wiring
-    rag_manager: RagManager,
+    *compat_args,
+    mini_app_base_url: str = "",
+    **_compat_kwargs,
 ) -> Router:
+    rag_manager = None
+    for value in compat_args:
+        if hasattr(value, "for_tenant"):
+            rag_manager = value
+    if not mini_app_base_url:
+        for value in reversed(compat_args):
+            if isinstance(value, str) and value.strip():
+                mini_app_base_url = value
+                break
+    if rag_manager is None:
+        raise RuntimeError("build_command_router requires a RagManager instance.")
     router = Router(name="commands")
 
     def _authorized(message: Message) -> bool:
@@ -55,6 +72,36 @@ def build_command_router(
             user_id,
             chat_id,
         )
+        track_event(
+            "command_used",
+            command=command_name,
+            user_id=user_id,
+            chat_id=chat_id,
+            has_args=bool(_extract_args(message)),
+        )
+
+    def _mini_app_markup(
+        *,
+        label: str,
+        screen: str,
+        query: str = "",
+        note_id: str = "",
+        job_id: str = "",
+    ):
+        markup = build_mini_app_markup(
+            mini_app_base_url,
+            label=label,
+            screen=screen,
+            query=query,
+            note_id=note_id,
+            job_id=job_id,
+        )
+        if markup is not None:
+            track_event("miniapp_cta_rendered", label=label, screen=screen)
+        return markup
+
+    def _quick_actions_markup():
+        return build_quick_actions_keyboard(mini_app_base_url)
 
     def _delete_all_notes(tenant_id: str) -> tuple[int, int, int]:
         rag = rag_manager.for_tenant(tenant_id)
@@ -63,7 +110,7 @@ def build_command_router(
         index_deleted = 0
 
         for note in tracked_notes:
-            note_path = (rag.vault_path / str(note["file_name"])).resolve()
+            note_path = _resolve_note_path(rag.vault_path, str(note["file_name"]))
             if not _is_within(note_path, rag.vault_path.resolve()):
                 continue
             if note_path.exists():
@@ -87,26 +134,80 @@ def build_command_router(
             await message.answer("❌ <i>В доступе отказано:</i> ваш ID не в белом списке.", parse_mode="HTML")
             return
         await message.answer(
-            "🤖 <b>Привет. Я готов помогать с твоим Obsidian.</b>\n"
+            "🤖 <b>Привет. Это твой быстрый inbox для знаний.</b>\n"
             f"{CARD_DIVIDER}\n"
-            "Отправляй текст, мысли, ссылки и голосовые, а я аккуратно сохраню их в базу.\n\n"
-            "🏷 <b>Поддерживаемые теги:</b>\n"
-            "• <code>#save</code>\n"
-            "• <code>#summary</code>\n"
-            "• <code>#task</code>\n"
-            "• <code>#translate</code>\n\n"
-            "🧭 <b>Команды:</b>\n"
-            "• <code>/status</code> — общая сводка по системе\n"
-            "• <code>/find &lt;запрос&gt;</code> — поиск по заметкам\n"
-            "• <code>/summary &lt;вопрос&gt;</code> — ответ по базе (RAG)\n"
-            "• <code>/job &lt;job_id | prefix&gt;</code> — статус конкретной задачи\n"
-            "• <code>/retry &lt;job_id&gt;</code> — перезапуск упавшей задачи\n"
-            "• <code>/delete &lt;ID|файл&gt;</code> — удалить заметку\n"
-            "• <code>/delete all</code> — запросить массовое удаление\n"
-            "• <code>/delete confirm &lt;token&gt;</code> — подтвердить удаление\n"
-            "• <code>/delete cancel</code> — отменить удаление\n\n"
-            "✅ <b>Можешь просто отправить сообщение, остальное беру на себя.</b>",
-            parse_mode="HTML"
+            "Перешли сюда ссылку, текст, заметку или голосовое. Я сохраню это и помогу потом найти по смыслу.\n\n"
+            "⚡ <b>Что можно сделать прямо сейчас</b>\n"
+            "• Отправить первую ссылку или мысль\n"
+            "• <code>/find &lt;запрос&gt;</code> для быстрого поиска\n"
+            "• <code>/summary &lt;вопрос&gt;</code> для ответа по базе\n"
+            "• <code>/status</code> для короткой сводки\n\n"
+            "Mini App нужен для полного поиска, чтения заметок и разбора очереди.",
+            parse_mode="HTML",
+            reply_markup=_quick_actions_markup(),
+        )
+
+    @router.message((F.text == "⚙️ Управление") | (F.text == "📊 Статус"))
+    async def quick_status_handler(message: Message) -> None:
+        if message.text == "⚙️ Управление":
+            if not _authorized(message):
+                return
+            await message.answer(
+                "⚙️ <b>Управление</b>\n\n"
+                "Здесь всё служебное:\n"
+                "• <code>/status</code> для состояния очереди и индекса\n"
+                "• <code>/delete имя_файла.md</code> для удаления одной заметки\n"
+                "• <code>/delete cancel</code> для отмены массового удаления",
+                parse_mode="HTML",
+                reply_markup=_quick_actions_markup(),
+            )
+            return
+        await status_handler(message)
+
+    @router.message((F.text == "➕ Добавить") | (F.text == "🕘 Последние"))
+    async def quick_latest_handler(message: Message) -> None:
+        if message.text == "➕ Добавить":
+            if not _authorized(message):
+                return
+            await message.answer(
+                "➕ <b>Добавить</b>\n\n"
+                "Просто отправь сюда:\n"
+                "• текст или идею\n"
+                "• ссылку\n"
+                "• голосовое\n"
+                "• фото или документ\n\n"
+                "Если нужно, можешь дописать теги вроде <code>#save</code> или <code>#summary</code>.",
+                parse_mode="HTML",
+                reply_markup=_quick_actions_markup(),
+            )
+            return
+        message.text = "/summary"
+        await summary_handler(message)
+
+    @router.message((F.text == "🔎 Найти") | (F.text == "🔎 Поиск"))
+    async def quick_search_handler(message: Message) -> None:
+        if not _authorized(message):
+            return
+        await message.answer(
+            "🔎 <b>Найти и Поиск</b>\n\n"
+            "Что можно сделать:\n"
+            "• <code>/find запрос</code> для быстрого поиска\n"
+            "• <code>/summary вопрос</code> для ответа по базе\n"
+            "• кнопка <b>📲 База</b> для полного поиска и просмотра заметок",
+            parse_mode="HTML",
+            reply_markup=_mini_app_markup(label="🔎 Открыть поиск", screen="search"),
+        )
+
+    @router.message(F.text == "🗑 Удаление")
+    async def quick_delete_handler(message: Message) -> None:
+        if not _authorized(message):
+            return
+        await message.answer(
+            "🗑 <b>Удаление заметок</b>\n\n"
+            "Быстро отменить массовое удаление: <code>/delete cancel</code>\n"
+            "Удалить конкретную заметку: <code>/delete имя_файла.md</code>",
+            parse_mode="HTML",
+            reply_markup=_quick_actions_markup(),
         )
 
     @router.message(Command("status"))
@@ -122,40 +223,11 @@ def build_command_router(
         recent = store.recent_jobs(limit=3, tenant_id=tenant_id)
         rag = rag_manager.for_tenant(tenant_id)
         integrity_ok, integrity_details = store.integrity_check()
-
-        lines = ["🤖 <b>Проверил текущее состояние.</b>", "Ниже краткая сводка по системе.", "", "📊 <b>Статус системы</b>", CARD_DIVIDER]
-        
-        # Индекс и хранилище
         rag_stats = rag.stats()
-        db_status = "✅ OK" if integrity_ok else f"❌ Ошибка ({html.escape(integrity_details)})"
-        lines.append("📁 <b>База знаний</b>")
-        lines.append(f"• RAG индекс: <b>{rag_stats['documents']}</b> док. / <b>{rag_stats['chunks']}</b> фрагм.")
-        lines.append(f"• Хранилище: {db_status}")
-        lines.append("")
-        lines.append("🩺 <b>Мониторинг процесса</b>")
-        lines.append(f"• Аптайм: <code>{uptime_human()}</code>")
-        lines.append(f"• Запущен: <code>{html.escape(started_at_iso())}</code>")
         err_text, err_at = last_error()
-        if err_text:
-            lines.append(f"• Последняя ошибка: <code>{html.escape(err_text[:100])}</code>")
-            lines.append(f"• Время ошибки: <code>{html.escape(err_at)}</code>")
-        else:
-            lines.append("• Последняя ошибка: <b>нет</b>")
-        lines.append("")
-
-        # Последние файлы
         recent_done_paths = [item.get("note_path", "") for item in recent if item.get("status") == "done"]
         recent_done_paths = [path for path in recent_done_paths if path]
-        if recent_done_paths:
-            lines.append("📝 <b>Недавние заметки</b>")
-            for path in recent_done_paths[:3]:
-                # Показываем только имя файла, чтобы не мусорить длинными путями
-                file_name = html.escape(Path(path).name)
-                lines.append(f"• <code>{file_name}</code>")
-            lines.append("")
-
-        # Очередь задач
-        lines.append("⚙️ <b>Очередь</b>")
+        lines = ["📊 <b>Короткая сводка</b>", CARD_DIVIDER]
         if counts:
             for key, value in sorted(counts.items(), key=lambda item: item[0]):
                 emoji = _job_status_emoji(_normalize_job_status(key))
@@ -163,19 +235,29 @@ def build_command_router(
                 lines.append(f"• {emoji} {label}: <b>{value}</b>")
         else:
             lines.append("• Очередь пуста")
-
-        # Ошибки
+        lines.append(f"• Индекс: <b>{rag_stats['documents']}</b> заметок / <b>{rag_stats['chunks']}</b> фрагментов")
+        lines.append(f"• Хранилище: {'✅ OK' if integrity_ok else '❌ требует внимания'}")
+        lines.append(f"• Аптайм: <code>{uptime_human()}</code>")
         if failures:
-            lines.append("")
-            lines.append("❌ <b>Последние ошибки</b>")
-            for item in failures:
-                error_text = html.escape((item.get("error") or "no error text").replace("\n", " ")[:100])
-                lines.append(f"• <code>{html.escape(_short_job(item['job_id']))}</code>: {error_text}...")
+            first_error = html.escape((failures[0].get("error") or "no error text").replace("\n", " ")[:80])
+            lines.append(f"• Последняя ошибка: <code>{first_error}</code>")
         else:
-            lines.append("")
             lines.append("✅ <b>Ошибок в последних задачах не вижу.</b>")
+        if err_text:
+            lines.append(f"• Runtime: <code>{html.escape(err_text[:80])}</code>")
+        else:
+            lines.append("• Runtime: <b>без ошибок</b>")
+        if not integrity_ok:
+            lines.append(f"• Проверка БД: <code>{html.escape(integrity_details[:80])}</code>")
+        if recent_done_paths:
+            latest_note = html.escape(Path(recent_done_paths[0]).name)
+            lines.append(f"• Последняя заметка: <code>{latest_note}</code>")
 
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=_mini_app_markup(label="📊 Открыть Jobs", screen="activity"),
+        )
 
     @router.message(Command("find"))
     async def find_handler(message: Message) -> None:
@@ -195,20 +277,21 @@ def build_command_router(
         
         if hits:
             lines = [
-                f"🤖 <b>Нашёл релевантные фрагменты по запросу</b> <code>{safe_query}</code>.",
+                f"🔍 <b>Быстрые результаты для</b> <code>{safe_query}</code>",
                 "",
-                f"🔍 <b>Поиск</b>: <code>{safe_query}</code>",
                 CARD_DIVIDER,
-                "✨ <b>Семантические совпадения</b>",
-                "",
             ]
-            for idx, hit in enumerate(hits, start=1):
-                snippet = html.escape(" ".join(hit.chunk_text.split())[:200])
-                safe_file = html.escape(hit.file_name)
-                lines.append(f"<b>{idx}.</b> <code>{safe_file}</code> <i>(схожесть: {hit.score:.2f})</i>")
-                lines.append(f"💬 <i>{snippet}...</i>")
+            for idx, hit in enumerate(_dedupe_hits_by_file(hits)[:3], start=1):
+                safe_file = html.escape(_display_note_name(hit.file_name))
+                snippet = html.escape(_preview_text(hit.chunk_text))
+                lines.append(f"<b>{idx}.</b> <code>{safe_file}</code>")
+                lines.append(f"💬 <i>{snippet}</i>")
                 lines.append("")
-            await message.answer("\n".join(lines), parse_mode="HTML")
+            await message.answer(
+                "\n".join(lines),
+                parse_mode="HTML",
+                reply_markup=_mini_app_markup(label="🔎 Открыть расширенный поиск", screen="search", query=query),
+            )
             return
 
         matches = find_notes(rag.vault_path, query, limit=5)
@@ -221,20 +304,21 @@ def build_command_router(
             return
 
         lines = [
-            f"🤖 <b>Семантических совпадений не нашлось, но есть текстовые результаты для</b> <code>{safe_query}</code>.",
+            f"🔍 <b>Текстовые совпадения для</b> <code>{safe_query}</code>",
             "",
-            f"🔍 <b>Поиск</b>: <code>{safe_query}</code>",
             CARD_DIVIDER,
-            "📌 <b>Текстовые совпадения</b>",
-            "",
         ]
-        for idx, item in enumerate(matches, start=1):
+        for idx, item in enumerate(matches[:3], start=1):
             safe_file = html.escape(item['file_name'])
             safe_snippet = html.escape(item['snippet'])
             lines.append(f"<b>{idx}.</b> <code>{safe_file}</code>")
             lines.append(f"💬 <i>{safe_snippet}</i>")
             lines.append("")
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=_mini_app_markup(label="🔎 Открыть расширенный поиск", screen="search", query=query),
+        )
 
     @router.message(Command("summary"))
     async def summary_handler(message: Message) -> None:
@@ -246,6 +330,16 @@ def build_command_router(
         rag = rag_manager.for_tenant(tenant_id)
         query = _extract_args(message)
         if query:
+            word_count = len(query.split())
+            if len(query) > SUMMARY_MAX_QUERY_CHARS or word_count > SUMMARY_MAX_QUERY_WORDS:
+                await message.answer(
+                    "⚠️ <b>Слишком длинный запрос для /summary.</b>\n"
+                    "Сократи вопрос до "
+                    f"<code>{SUMMARY_MAX_QUERY_CHARS}</code> символов "
+                    f"или <code>{SUMMARY_MAX_QUERY_WORDS}</code> слов и повтори попытку.",
+                    parse_mode="HTML",
+                )
+                return
             answer = rag.answer(query, top_k=4)
             safe_query = html.escape(query)
             if not answer.sources:
@@ -256,8 +350,34 @@ def build_command_router(
                 )
                 return
             safe_answer = html.escape(answer.answer)
+            source_hits = _dedupe_hits_by_file(answer.sources)
+            if answer.mode == "extractive":
+                lines = [
+                    "🧠 <b>Короткий ответ</b>",
+                    "",
+                    f"🧠 <b>Вопрос</b>: <code>{safe_query}</code>",
+                    CARD_DIVIDER,
+                    "Нашёл несколько заметок по теме. Самое полезное:",
+                    "",
+                ]
+                for idx, src in enumerate(source_hits[:3], start=1):
+                    safe_file = html.escape(_display_note_name(src.file_name))
+                    snippet = html.escape(_preview_text(src.chunk_text))
+                    lines.append(f"{idx}. <b>{safe_file}</b>")
+                    lines.append(f"   {snippet}")
+                lines.append("")
+                lines.append("📚 <b>Источники</b>")
+                for src in source_hits[:4]:
+                    safe_file = html.escape(src.file_name)
+                    lines.append(f"• <code>{safe_file}</code>")
+                await message.answer(
+                    "\n".join(lines),
+                    parse_mode="HTML",
+                    reply_markup=_mini_app_markup(label="📲 Открыть поиск по вопросу", screen="search", query=query),
+                )
+                return
             lines = [
-                "🤖 <b>Вот что получилось по твоему вопросу:</b>",
+                "🧠 <b>Короткий ответ</b>",
                 "",
                 f"🧠 <b>Вопрос</b>: <code>{safe_query}</code>",
                 CARD_DIVIDER,
@@ -265,10 +385,14 @@ def build_command_router(
                 "",
                 "📚 <b>На основе заметок</b>",
             ]
-            for src in answer.sources:
+            for src in source_hits[:4]:
                 safe_file = html.escape(src.file_name)
-                lines.append(f"• <code>{safe_file}</code> <i>(схожесть: {src.score:.2f})</i>")
-            await message.answer("\n".join(lines), parse_mode="HTML")
+                lines.append(f"• <code>{safe_file}</code>")
+            await message.answer(
+                "\n".join(lines),
+                parse_mode="HTML",
+                reply_markup=_mini_app_markup(label="📲 Открыть поиск по вопросу", screen="search", query=query),
+            )
             return
 
         latest = latest_notes(rag.vault_path, limit=3)
@@ -457,7 +581,7 @@ def build_command_router(
 
         note = resolved
         rag = rag_manager.for_tenant(tenant_id)
-        note_path = (rag.vault_path / str(note["file_name"])).resolve()
+        note_path = _resolve_note_path(rag.vault_path, str(note["file_name"]))
         if not _is_within(note_path, rag.vault_path.resolve()):
             await message.answer("❌ <b>Удаление отклонено:</b> путь заметки вне хранилища.", parse_mode="HTML")
             return
@@ -540,3 +664,47 @@ def _status_label(status: str) -> str:
         "failed": "Ошибка",
     }
     return labels.get(normalized, normalized.capitalize() or "Unknown")
+
+
+def _display_note_name(file_name: str) -> str:
+    stem = Path(file_name).stem
+    parts = stem.split(" - ", 1)
+    if len(parts) == 2:
+        stem = parts[1]
+    if stem.endswith(")") and "(" in stem:
+        stem = stem.rsplit("(", 1)[0].rstrip()
+    return stem.strip() or Path(file_name).stem
+
+
+def _preview_text(text: str, max_chars: int = 180) -> str:
+    cleaned = _humanize_chunk_text(text)
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[: max_chars - 3].rstrip() + "..."
+
+
+def _dedupe_hits_by_file(hits) -> list:
+    seen: set[str] = set()
+    deduped = []
+    for hit in hits:
+        key = str(getattr(hit, "file_name", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(hit)
+    return deduped
+
+
+def _resolve_note_path(vault_root: Path, file_name: str) -> Path:
+    direct = (vault_root / file_name).resolve()
+    if direct.exists():
+        return direct
+
+    matches = sorted(
+        candidate.resolve()
+        for candidate in vault_root.rglob(file_name)
+        if candidate.is_file()
+    )
+    if matches:
+        return matches[0]
+    return direct

@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.infra.ai_fallback import reset_remote_ai
 from src.pipeline.enrichment import enrich_payload_with_ai
 
 
@@ -31,6 +32,9 @@ class _FakeClient:
 
 
 class EnrichmentTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        reset_remote_ai("payload_enrichment")
+
     def test_fallback_when_api_key_missing(self) -> None:
         payload = {
             "content": "original text",
@@ -62,6 +66,49 @@ class EnrichmentTests(unittest.TestCase):
         self.assertEqual(result["enriched_text"], "parsed text")
         self.assertEqual(result["auto_tags"], ["keep_me"])
         self.assertEqual(result["ai_summary"], "old summary")
+
+    def test_quota_failure_triggers_cooldown_fallback(self) -> None:
+        payload = {
+            "content": "original text",
+            "enriched_text": "parsed text",
+            "auto_tags": ["keep_me"],
+        }
+        first = enrich_payload_with_ai(
+            payload,
+            api_key="test-key",
+            model_name="gemini-2.5-flash",
+            client=_FakeClient(models=_FakeModels(error=RuntimeError("429 RESOURCE_EXHAUSTED"))),
+        )
+        self.assertEqual(first["auto_tags"], ["keep_me"])
+        second = enrich_payload_with_ai(
+            payload,
+            api_key="test-key",
+            model_name="gemini-2.5-flash",
+            client=_FakeClient(models=_FakeModels(response_text='{"tags":["new_tag"]}')),
+        )
+        self.assertEqual(second["auto_tags"], ["keep_me"])
+
+    def test_quota_cooldown_keeps_existing_summary(self) -> None:
+        payload = {
+            "content": "original text",
+            "enriched_text": "parsed text",
+            "auto_tags": ["keep_me"],
+            "ai_summary": "existing summary",
+        }
+        first = enrich_payload_with_ai(
+            payload,
+            api_key="test-key",
+            model_name="gemini-2.5-flash",
+            client=_FakeClient(models=_FakeModels(error=RuntimeError("429 quota exceeded"))),
+        )
+        self.assertEqual(first["ai_summary"], "existing summary")
+        second = enrich_payload_with_ai(
+            payload,
+            api_key="test-key",
+            model_name="gemini-2.5-flash",
+            client=_FakeClient(models=_FakeModels(response_text='{"summary":"new"}')),
+        )
+        self.assertEqual(second["ai_summary"], "existing summary")
 
     def test_merge_generated_tags_and_summary(self) -> None:
         payload = {

@@ -16,7 +16,7 @@ def chunk_text(text: str, max_chars: int = 1200, overlap_chars: int = 180) -> li
 
     paragraphs = [part.strip() for part in PARAGRAPH_SPLIT_RE.split(normalized) if part.strip()]
     if not paragraphs:
-        paragraphs = [normalized]
+        paragraphs = [normalized]  # pragma: no cover
 
     chunks: list[str] = []
     current = ""

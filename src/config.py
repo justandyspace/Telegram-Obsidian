@@ -20,6 +20,7 @@ class AppConfig:
     webhook_bind_port: int
     webhook_path: str
     webhook_secret_token: str
+    mini_app_base_url: str
     vault_path: Path
     state_dir: Path
     cache_dir: Path
@@ -35,6 +36,14 @@ class AppConfig:
     gemini_api_key: str
     gemini_embed_model: str
     gemini_generation_model: str
+    gdrive_enabled: bool = False
+    gdrive_client_id: str = ""
+    gdrive_client_secret: str = ""
+    gdrive_refresh_token: str = ""
+    gdrive_root_folder_id: str = ""
+    gdrive_share_public_links: bool = False
+    gdrive_vault_mirror_interval_seconds: int = 1800
+    gdrive_db_snapshot_interval_seconds: int = 86400
 
     @property
     def state_db_path(self) -> Path:
@@ -53,7 +62,7 @@ def _validate_webhook_secret(secret: str) -> None:
         raise RuntimeError("WEBHOOK_SECRET_TOKEN must be at least 16 characters for secure webhook mode.")
     weak_values = {"change_me", "changeme", "secret", "token", "webhook_secret"}
     if value.lower() in weak_values:
-        raise RuntimeError("WEBHOOK_SECRET_TOKEN is too weak; use a random token.")
+        raise RuntimeError("WEBHOOK_SECRET_TOKEN is too weak; use a random token.")  # pragma: no cover
 
 
 def load_config() -> AppConfig:
@@ -114,6 +123,7 @@ def load_config() -> AppConfig:
     if not webhook_path.startswith("/"):
         webhook_path = "/" + webhook_path
     webhook_secret_token = os.getenv("WEBHOOK_SECRET_TOKEN", "").strip()
+    mini_app_base_url = os.getenv("MINI_APP_BASE_URL", "").strip()
     if telegram_mode == "webhook" and not webhook_base_url:
         raise RuntimeError("WEBHOOK_BASE_URL is required when TELEGRAM_MODE=webhook.")
     webhook_secret_required = telegram_mode == "webhook" or (
@@ -140,6 +150,7 @@ def load_config() -> AppConfig:
         webhook_bind_port=webhook_bind_port,
         webhook_path=webhook_path,
         webhook_secret_token=webhook_secret_token,
+        mini_app_base_url=mini_app_base_url,
         vault_path=vault_path,
         state_dir=state_dir,
         cache_dir=cache_dir,
@@ -159,4 +170,17 @@ def load_config() -> AppConfig:
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         gemini_embed_model=os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001").strip(),
         gemini_generation_model=os.getenv("GEMINI_GENERATION_MODEL", "gemini-2.0-flash-lite").strip(),
+        gdrive_enabled=os.getenv("GDRIVE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        gdrive_client_id=os.getenv("GDRIVE_CLIENT_ID", "").strip(),
+        gdrive_client_secret=os.getenv("GDRIVE_CLIENT_SECRET", "").strip(),
+        gdrive_refresh_token=os.getenv("GDRIVE_REFRESH_TOKEN", "").strip(),
+        gdrive_root_folder_id=os.getenv("GDRIVE_ROOT_FOLDER_ID", "").strip(),
+        gdrive_share_public_links=os.getenv("GDRIVE_SHARE_PUBLIC_LINKS", "false").strip().lower()
+        in {"1", "true", "yes", "on"},
+        gdrive_vault_mirror_interval_seconds=int(
+            os.getenv("GDRIVE_VAULT_MIRROR_INTERVAL_SECONDS", "1800")
+        ),
+        gdrive_db_snapshot_interval_seconds=int(
+            os.getenv("GDRIVE_DB_SNAPSHOT_INTERVAL_SECONDS", "86400")
+        ),
     )

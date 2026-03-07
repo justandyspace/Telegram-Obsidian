@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""Mega-smoke test that checks ALL bot commands by discovering real data.
-"""
+"""Deterministic Telegram E2E flow with chat replies and side-effect checks."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-import re
 import sys
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from telethon import TelegramClient
+
+from src.bot.auth import build_tenant_context
+from src.infra.storage import StateStore
+from src.obsidian.search import find_notes
 
 
 def _require_env(name: str) -> str:
@@ -21,6 +26,10 @@ def _require_env(name: str) -> str:
     if not value:
         raise SystemExit(f"Missing required env var: {name}")
     return value
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
 def _detect_bot_username() -> str:
@@ -40,6 +49,27 @@ def _detect_bot_username() -> str:
     return str(payload["result"].get("username") or "").strip()
 
 
+def _runtime_path(env_name: str, fallback_relative: str) -> Path:
+    raw = (os.getenv(env_name) or "").strip()
+    if raw and not raw.startswith("/srv/") and not raw.startswith("/data/"):
+        return Path(raw).resolve()
+    return (_project_root() / fallback_relative).resolve()
+
+
+def _session_path() -> Path:
+    default_session = _project_root() / ".sessions" / "session"
+    return Path(os.getenv("TG_SESSION", str(default_session)).strip()).resolve()
+
+
+def _normalize(text: str) -> str:
+    return " ".join((text or "").split()).strip()
+
+
+def _assert_contains(text: str, needle: str, label: str) -> None:
+    if needle not in text:
+        raise AssertionError(f"{label}: expected to find {needle!r} in reply: {text!r}")
+
+
 async def _wait_for_bot_reply(
     client: TelegramClient,
     bot_username: str,
@@ -49,51 +79,87 @@ async def _wait_for_bot_reply(
 ) -> str:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        messages = await client.get_messages(bot_username, limit=10)
+        messages = await client.get_messages(bot_username, limit=20)
         for message in messages:
-            if message.out:
+            if message.out or message.id <= sent_message_id:
                 continue
-            if message.id <= sent_message_id:
-                continue
-            text = (message.raw_text or "").strip()
+            text = _normalize(message.raw_text or "")
             if text:
                 return text
         await asyncio.sleep(1.0)
     raise TimeoutError("Timed out while waiting for bot reply.")
 
 
-async def _wait_for_multiple_bot_replies(
+async def _send_and_expect_reply(
     client: TelegramClient,
     bot_username: str,
+    command: str,
     *,
-    min_message_id: int,
-    expected_count: int,
     timeout_seconds: int,
-) -> list[str]:
-    deadline = time.time() + timeout_seconds
-    seen_ids: set[int] = set()
-    replies: list[str] = []
-
-    while time.time() < deadline:
-        messages = await client.get_messages(bot_username, limit=30)
-        for message in messages:
-            if message.out:
-                continue
-            if message.id <= min_message_id:
-                continue
-            if message.id in seen_ids:
-                continue
-            text = (message.raw_text or "").strip()
-            if not text:
-                continue
-            seen_ids.add(message.id)
-            replies.append(text)
-        if len(replies) >= expected_count:
-            return replies
-        await asyncio.sleep(1.0)
-    raise TimeoutError(
-        f"Timed out waiting for {expected_count} replies, got {len(replies)}."
+    label: str,
+) -> str:
+    print(f"Testing {label}: {command}")
+    sent = await client.send_message(bot_username, command)
+    reply = await _wait_for_bot_reply(
+        client,
+        bot_username,
+        sent_message_id=sent.id,
+        timeout_seconds=timeout_seconds,
     )
+    print(f"[OK] {label}: {reply[:220]}")
+    return reply
+
+
+def _wait_for_note_persisted(
+    store: StateStore,
+    *,
+    tenant_id: str,
+    vault_path: Path,
+    marker: str,
+    timeout_seconds: int,
+) -> dict[str, str]:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        matches = find_notes(vault_path, marker, limit=5)
+        notes = store.list_notes(tenant_id=tenant_id)
+        notes_by_file = {str(item["file_name"]): item for item in notes}
+        for match in matches:
+            file_name = str(match["file_name"])
+            note_row = notes_by_file.get(file_name)
+            if note_row is None:
+                continue
+            note_path = (vault_path / file_name).resolve()
+            job = store.get_job_status(str(note_row["last_job_id"]), tenant_id=tenant_id)
+            if note_path.exists() and job and str(job.get("status")) == "done":
+                return {
+                    "file_name": file_name,
+                    "note_id": str(note_row["note_id"]),
+                    "content_fingerprint": str(note_row["content_fingerprint"]),
+                    "job_id": str(note_row["last_job_id"]),
+                    "note_path": str(note_path),
+                }
+        time.sleep(1.0)
+    raise TimeoutError("Timed out waiting for note persistence in vault + SQLite.")
+
+
+def _wait_for_note_deleted(
+    store: StateStore,
+    *,
+    tenant_id: str,
+    vault_path: Path,
+    file_name: str,
+    marker: str,
+    timeout_seconds: int,
+) -> None:
+    deadline = time.time() + timeout_seconds
+    note_path = (vault_path / file_name).resolve()
+    while time.time() < deadline:
+        still_in_db = any(str(item["file_name"]) == file_name for item in store.list_notes(tenant_id=tenant_id))
+        still_in_search = bool(find_notes(vault_path, marker, limit=1))
+        if not note_path.exists() and not still_in_db and not still_in_search:
+            return
+        time.sleep(1.0)
+    raise TimeoutError("Timed out waiting for note deletion from vault + SQLite.")
 
 
 async def main() -> int:
@@ -103,126 +169,176 @@ async def main() -> int:
     api_id = int(_require_env("TG_API_ID"))
     api_hash = _require_env("TG_API_HASH")
     bot_username = _detect_bot_username()
-    timeout = int(os.getenv("TG_TIMEOUT_SECONDS") or "25")
+    timeout = int(os.getenv("TG_TIMEOUT_SECONDS") or "35")
+    state_db_path = _runtime_path("STATE_DIR", ".data/state") / "bot_state.sqlite3"
+    vault_path = _runtime_path("VAULT_PATH", "local_obsidian_inbox")
+    session_path = _session_path()
 
-    default_session = Path(__file__).resolve().parents[1] / ".sessions" / "session"
-    session_path = Path(os.getenv("TG_SESSION", str(default_session)).strip())
-    
-    print(f"=== MEGA SMOKE TEST START ===")
+    print("=== DETERMINISTIC TELEGRAM E2E START ===")
     print(f"Target Bot: @{bot_username}")
-    
+    print(f"State DB: {state_db_path}")
+    print(f"Vault: {vault_path}")
+
     client = TelegramClient(str(session_path), api_id, api_hash)
     await client.connect()
-    
     if not await client.is_user_authorized():
-        print("Error: Session not authorized. Run regular smoke test with QR first.")
+        print("Error: Session not authorized. Run tg_smoke_test.py login flow first.")
         return 1
 
-    results = []
+    me = await client.get_me()
+    if me is None or getattr(me, "id", None) is None:
+        print("Error: failed to resolve Telegram account identity.")
+        return 1
 
-    async def run_cmd(cmd: str, label: str) -> str:
-        print(f"Testing {label}: {cmd}")
-        sent = await client.send_message(bot_username, cmd)
-        try:
-            reply = await _wait_for_bot_reply(client, bot_username, sent_message_id=sent.id, timeout_seconds=timeout)
-            print(f"[OK] {label}")
-            results.append((label, True))
-            return reply
-        except Exception as e:
-            print(f"[FAIL] {label}: {e}")
-            results.append((label, False))
-            return ""
+    tenant_id = build_tenant_context(int(me.id)).tenant_id
+    marker = f"codex-e2e-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+    intake_text = f"{marker} #save deterministic telegram e2e note"
 
-    # 1. /start
-    await run_cmd("/start", "START_COMMAND")
+    store = StateStore(state_db_path)
+    store.initialize()
 
-    # 2. /status & Data Discovery
-    status_reply = await run_cmd("/status", "STATUS_COMMAND")
-    
-    # Discovery: Job ID (hex)
-    job_ids = re.findall(r"<code>([a-f0-9]{10,})</code>", status_reply)
-    # Discovery: Note names (e.g. 20260305...md)
-    note_names = re.findall(r"<code>(\d{8}-\d{4}\s*-.+?\.md)</code>", status_reply)
+    results: list[tuple[str, bool]] = []
 
-    # 3. /find (if note found)
-    if note_names:
-        note_to_find = note_names[0]
-        # Use first word of note name for better search matching
-        query = note_to_find.split("-")[-1].split(".")[0].strip()[:20]
-        await run_cmd(f"/find {query}", "FIND_COMMAND")
-    else:
-        print("[SKIP] FIND_COMMAND (no notes in status)")
-        results.append(("FIND_COMMAND", True))
-
-    # 4. /summary
-    await run_cmd("/summary О чем мои последние заметки?", "SUMMARY_COMMAND")
-
-    # 5. /job (if job ID found)
-    if job_ids:
-        await run_cmd(f"/job {job_ids[0]}", "JOB_COMMAND")
-    else:
-        print("[SKIP] JOB_COMMAND (no job IDs in status)")
-        results.append(("JOB_COMMAND", True))
-
-    # 6. /delete cancel
-    await run_cmd("/delete cancel", "DELETE_CANCEL_COMMAND")
-
-    # 7. Dirty: /summary without args
-    await run_cmd("/summary", "SUMMARY_EMPTY_ARGS")
-
-    # 8. Dirty: long command payload
-    long_query = " ".join(["оченьдлинныйтекст"] * 200)
-    await run_cmd(f"/summary {long_query}", "SUMMARY_LONG_TEXT")
-
-    # 9. Dirty: invalid delete argument
-    invalid_delete_reply = await run_cmd("/delete asdasd", "DELETE_INVALID_ARG")
-    if "Удаление отклонено" not in invalid_delete_reply and "note not found" not in invalid_delete_reply.lower():
-        print("[FAIL] DELETE_INVALID_ARG: unexpected response format")
-        results.append(("DELETE_INVALID_ARG_FORMAT", False))
-    else:
-        print("[OK] DELETE_INVALID_ARG response format")
-        results.append(("DELETE_INVALID_ARG_FORMAT", True))
-
-    # 10. Dirty: burst commands sent quickly
-    print("Testing BURST_COMMANDS: /status + /summary + /delete cancel")
-    burst_commands = ["/status", "/summary", "/delete cancel"]
-    sent_ids: list[int] = []
-    for cmd in burst_commands:
-        sent = await client.send_message(bot_username, cmd)
-        sent_ids.append(sent.id)
     try:
-        await _wait_for_multiple_bot_replies(
+        start_reply = await _send_and_expect_reply(
             client,
             bot_username,
-            min_message_id=max(sent_ids),
-            expected_count=1,
+            "/start",
             timeout_seconds=timeout,
+            label="START_COMMAND",
         )
-        print("[OK] BURST_COMMANDS")
-        results.append(("BURST_COMMANDS", True))
-    except Exception as e:
-        print(f"[FAIL] BURST_COMMANDS: {e}")
-        results.append(("BURST_COMMANDS", False))
+        _assert_contains(start_reply, "Obsidian", "START_COMMAND")
+        results.append(("START_COMMAND", True))
 
-    # 11. /delete all (Request)
-    await run_cmd("/delete all", "DELETE_ALL_REQUEST")
-    
-    # 12. /delete cancel (Again, to cleanup request)
-    await run_cmd("/delete cancel", "DELETE_CANCEL_CLEANUP")
+        status_reply = await _send_and_expect_reply(
+            client,
+            bot_username,
+            "/status",
+            timeout_seconds=timeout,
+            label="STATUS_COMMAND",
+        )
+        _assert_contains(status_reply, "краткая сводка", "STATUS_COMMAND")
+        results.append(("STATUS_COMMAND", True))
 
-    print("\n=== MEGA SMOKE SUMMARY ===")
-    all_ok = True
-    for label, ok in results:
-        status = "PASS" if ok else "FAIL"
-        print(f"{status}: {label}")
-        if not ok:
-            all_ok = False
+        intake_reply = await _send_and_expect_reply(
+            client,
+            bot_username,
+            intake_text,
+            timeout_seconds=timeout,
+            label="INGEST_TEXT",
+        )
+        if not intake_reply:
+            raise AssertionError("INGEST_TEXT: bot reply is empty.")
+        results.append(("INGEST_TEXT", True))
 
-    await client.disconnect()
-    return 0 if all_ok else 1
+        note_info = _wait_for_note_persisted(
+            store,
+            tenant_id=tenant_id,
+            vault_path=vault_path,
+            marker=marker,
+            timeout_seconds=70,
+        )
+        print(f"[OK] NOTE_PERSISTED: {note_info['file_name']}")
+        results.append(("NOTE_PERSISTED", True))
+
+        job_status = store.get_job_status(note_info["job_id"], tenant_id=tenant_id)
+        if not job_status or str(job_status.get("status")) != "done":
+            raise AssertionError(f"JOB_DONE: unexpected status {job_status!r}")
+        print(f"[OK] JOB_DONE: {note_info['job_id']}")
+        results.append(("JOB_DONE", True))
+
+        find_reply = await _send_and_expect_reply(
+            client,
+            bot_username,
+            f"/find {marker}",
+            timeout_seconds=timeout,
+            label="FIND_CREATED_NOTE",
+        )
+        _assert_contains(find_reply, note_info["file_name"], "FIND_CREATED_NOTE")
+        results.append(("FIND_CREATED_NOTE", True))
+
+        summary_reply = await _send_and_expect_reply(
+            client,
+            bot_username,
+            f"/summary {marker}",
+            timeout_seconds=timeout,
+            label="SUMMARY_CREATED_NOTE",
+        )
+        if "не могу ответить уверенно" in summary_reply:
+            raise AssertionError("SUMMARY_CREATED_NOTE: summary did not ground on created note.")
+        _assert_contains(summary_reply, note_info["file_name"], "SUMMARY_CREATED_NOTE")
+        results.append(("SUMMARY_CREATED_NOTE", True))
+
+        long_query = " ".join(["оченьдлинныйтекст"] * 200)
+        long_reply = await _send_and_expect_reply(
+            client,
+            bot_username,
+            f"/summary {long_query}",
+            timeout_seconds=timeout,
+            label="SUMMARY_LONG_TEXT",
+        )
+        _assert_contains(long_reply, "Слишком длинный запрос", "SUMMARY_LONG_TEXT")
+        results.append(("SUMMARY_LONG_TEXT", True))
+
+        delete_cancel_reply = await _send_and_expect_reply(
+            client,
+            bot_username,
+            "/delete cancel",
+            timeout_seconds=timeout,
+            label="DELETE_CANCEL",
+        )
+        if "Нечего отменять" not in delete_cancel_reply and "отменено" not in delete_cancel_reply:
+            raise AssertionError(f"DELETE_CANCEL: unexpected reply {delete_cancel_reply!r}")
+        results.append(("DELETE_CANCEL", True))
+
+        delete_reply = await _send_and_expect_reply(
+            client,
+            bot_username,
+            f"/delete {note_info['file_name']}",
+            timeout_seconds=timeout,
+            label="DELETE_CREATED_NOTE",
+        )
+        _assert_contains(delete_reply, "Заметка удалена", "DELETE_CREATED_NOTE")
+        results.append(("DELETE_CREATED_NOTE", True))
+
+        _wait_for_note_deleted(
+            store,
+            tenant_id=tenant_id,
+            vault_path=vault_path,
+            file_name=note_info["file_name"],
+            marker=marker,
+            timeout_seconds=30,
+        )
+        print("[OK] NOTE_DELETED")
+        results.append(("NOTE_DELETED", True))
+
+        find_deleted_reply = await _send_and_expect_reply(
+            client,
+            bot_username,
+            f"/find {marker}",
+            timeout_seconds=timeout,
+            label="FIND_AFTER_DELETE",
+        )
+        _assert_contains(find_deleted_reply, "точных совпадений пока нет", "FIND_AFTER_DELETE")
+        results.append(("FIND_AFTER_DELETE", True))
+
+        print("\n=== DETERMINISTIC TELEGRAM E2E SUMMARY ===")
+        for label, ok in results:
+            print(f"{'PASS' if ok else 'FAIL'}: {label}")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"[FAIL] {type(exc).__name__}: {exc}")
+        print("\n=== DETERMINISTIC TELEGRAM E2E SUMMARY ===")
+        for label, ok in results:
+            print(f"{'PASS' if ok else 'FAIL'}: {label}")
+        return 1
+    finally:
+        store.close()
+        await client.disconnect()
+
 
 if __name__ == "__main__":
     try:
-        sys.exit(asyncio.run(main()))
+        raise SystemExit(asyncio.run(main()))
     except KeyboardInterrupt:
-        sys.exit(130)
+        raise SystemExit(130) from None

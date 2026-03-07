@@ -57,7 +57,7 @@ class Phase3RagTests(unittest.TestCase):
         answer = rag.answer("When is the payment deadline?", top_k=3)
         self.assertTrue(answer.sources)
         self.assertIn(note_b.name, [item.file_name for item in answer.sources])
-        self.assertIn("Grounded findings", answer.answer)
+        self.assertIn("Вот что удалось найти", answer.answer)
 
     def test_incremental_note_reindex(self) -> None:
         note = self.root / "vault" / "20260304-1500 - Ops Note (C1).md"

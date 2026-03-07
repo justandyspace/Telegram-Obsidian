@@ -7,11 +7,13 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from google import genai
 from google.genai import types
 
+from src.infra.ai_fallback import is_remote_ai_available, mark_remote_ai_failure, reset_remote_ai
+from src.infra.logging import get_logger
 from src.infra.resilience import RetryPolicy, with_retry
 from src.parsers.models import ParseResult
 from src.parsers.url_safety import safe_http_get
@@ -40,6 +42,8 @@ _TRANSCRIBE_PROMPT = (
     "Keep original language. "
     "If speech is missing or unclear, briefly explain."
 )
+LOGGER = get_logger(__name__)
+_AI_SCOPE = "voice_transcription"
 
 
 def parse_voice(source: str, timeout_seconds: int = 40) -> ParseResult:
@@ -54,43 +58,40 @@ def parse_voice(source: str, timeout_seconds: int = 40) -> ParseResult:
             links=[source],
             error="GEMINI_API_KEY is missing",
         )
+    if not is_remote_ai_available(_AI_SCOPE):
+        return ParseResult(
+            parser="voice",
+            source_url=source,
+            status="fallback",
+            title="Voice transcription unavailable",
+            text="Voice transcription is temporarily running in fallback mode.",
+            links=[source],
+            error="remote ai quota cooldown is active",
+        )
 
-    local_path = ""
-    uploaded_name = ""
-    uploaded_uri = ""
     client = genai.Client(api_key=api_key)
     try:
-        local_path = _resolve_local_audio_path(source, timeout_seconds=timeout_seconds)
-        mime_type = _guess_mime_type(local_path)
-        
+        audio_bytes, mime_type = _load_audio_bytes(source, timeout_seconds=timeout_seconds)
+
         policy = RetryPolicy(max_attempts=4, base_delay_seconds=2.0, max_delay_seconds=15.0)
-        
-        def _call_upload() -> Any:
-            return client.files.upload(
-                file=local_path,
-                config=types.UploadFileConfig(mime_type=mime_type),
-            )
-            
-        uploaded = with_retry(policy, _call_upload, exc_types=(Exception,))
-        uploaded_name = uploaded.name or ""
-        uploaded_uri = uploaded.uri or ""
 
         model_name = os.getenv("GEMINI_GENERATION_MODEL", "gemini-2.0-flash-lite").strip()
-        
+
         def _call_generate() -> Any:
             return client.models.generate_content(
                 model=model_name,
-                contents=[uploaded, _TRANSCRIBE_PROMPT],
+                contents=[
+                    _TRANSCRIBE_PROMPT,
+                    types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                ],
             )
-            
+
         response = with_retry(policy, _call_generate, exc_types=(Exception,))
-        
+        reset_remote_ai(_AI_SCOPE)
+
         transcript = normalize_text(str(response.text or ""))[:12000]
         status = "ok" if transcript else "fallback"
         text = transcript or "Audio processed, but transcript is empty."
-        links = [source]
-        if uploaded_uri:
-            links.append(uploaded_uri)
 
         return ParseResult(
             parser="voice",
@@ -98,30 +99,51 @@ def parse_voice(source: str, timeout_seconds: int = 40) -> ParseResult:
             status=status,
             title="Voice transcription",
             text=text,
-            links=links,
+            links=[source],
             error=None if transcript else "Empty transcript from Gemini",
         )
     except Exception as exc:  # noqa: BLE001
+        mark_remote_ai_failure(_AI_SCOPE, exc)
+        if is_remote_ai_available(_AI_SCOPE):
+            status = "error"
+            text = ""
+            error = str(exc)[:500]
+        else:
+            status = "fallback"
+            text = "Voice transcription is temporarily unavailable due to remote AI limits."
+            error = "remote ai quota cooldown is active"
         return ParseResult(
             parser="voice",
             source_url=source,
-            status="error",
+            status=status,
             title="Voice transcription failed",
-            text="",
+            text=text,
             links=[source],
-            error=str(exc)[:500],
+            error=error,
         )
-    finally:
-        if uploaded_name:
-            try:
-                client.files.delete(name=uploaded_name)
-            except Exception:  # noqa: BLE001
-                pass
-        if _is_temp_path(local_path):
-            try:
-                Path(local_path).unlink(missing_ok=True)
-            except Exception:  # noqa: BLE001
-                pass
+
+
+def _load_audio_bytes(source: str, *, timeout_seconds: int) -> tuple[bytes, str]:
+    parsed = urlparse(source)
+    if parsed.scheme in {"http", "https"}:
+        response = safe_http_get(
+            source,
+            timeout_seconds=timeout_seconds,
+            max_body_bytes=30 * 1024 * 1024,
+        )
+        response.raise_for_status()
+        try:
+            return bytes(response.content), _guess_mime_type_from_source(
+                source,
+                response.headers.get("Content-Type", ""),
+            )
+        finally:
+            response.close()
+
+    path = Path(source)
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"Audio file not found: {source}")
+    return path.read_bytes(), _guess_mime_type(str(path))
 
 
 def _resolve_local_audio_path(source: str, *, timeout_seconds: int) -> str:
@@ -163,6 +185,20 @@ def _guess_mime_type(path: str) -> str:
     if guessed and (guessed.startswith("audio/") or guessed.startswith("video/")):
         return guessed
     return "audio/mpeg"
+
+
+def _guess_mime_type_from_source(source: str, content_type: str) -> str:
+    header_value = content_type.split(";")[0].strip().lower()
+    if header_value and (header_value.startswith("audio/") or header_value.startswith("video/")):
+        return header_value
+    parsed = urlparse(source)
+    for key, value in parse_qsl(parsed.fragment, keep_blank_values=True):
+        if key.strip().lower() != "tgmime":
+            continue
+        mime_hint = value.strip().lower()
+        if mime_hint.startswith("audio/") or mime_hint.startswith("video/"):
+            return mime_hint
+    return _guess_mime_type(parsed.path)
 
 
 def _is_temp_path(path: str) -> bool:

@@ -22,17 +22,19 @@ class NotePayload:
 
 
 def render_meta(payload: NotePayload) -> str:
-    tags = ", ".join(f"#{tag}" for tag in payload.hashtags) if payload.hashtags else "none"
-    actions = ", ".join(f"#{action}" for action in payload.actions)
+    tags = "[" + ", ".join(payload.hashtags) + "]" if payload.hashtags else "[]"
+    actions = "[" + ", ".join(payload.actions) + "]" if payload.actions else "[]"
     meta_str = (
-        f"note_id: {payload.note_id}\n"
-        f"source_chat_id: {payload.source_chat_id}\n"
-        f"source_message_id: {payload.source_message_id}\n"
-        f"source_user_id: {payload.source_user_id}\n"
-        f"source_datetime: {payload.source_datetime.isoformat()}\n"
+        "---\n"
+        f"id: {payload.note_id}\n"
+        f"chat_id: {payload.source_chat_id}\n"
+        f"message_id: {payload.source_message_id}\n"
+        f"user_id: {payload.source_user_id}\n"
+        f"date: {payload.source_datetime.isoformat()}\n"
     )
     if payload.forward_source:
-        meta_str += f"forward_source: {payload.forward_source}\n"
+        meta_str += f"forward: \"{payload.forward_source}\"\n"
     meta_str += f"actions: {actions}\n"
-    meta_str += f"tags: {tags}"
+    meta_str += f"tags: {tags}\n"
+    meta_str += "---"
     return meta_str

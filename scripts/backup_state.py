@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -35,7 +35,7 @@ def main() -> int:
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     backup_root = out_dir / f"backup-{stamp}"
     backup_root.mkdir(parents=True, exist_ok=False)
 

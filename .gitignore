@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
 
 # Virtual environments
 .venv/
@@ -21,9 +22,12 @@ billing_details.txt
 .data/
 backups/
 local_obsidian_inbox/
+.sessions/
 
 # OS/editor
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+feed.html
+*.png

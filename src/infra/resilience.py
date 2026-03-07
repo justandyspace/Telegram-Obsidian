@@ -46,7 +46,7 @@ def with_retry[T](policy: RetryPolicy, operation: Callable[[], T], exc_types: tu
             delay = policy.backoff_delay(attempt)
             LOGGER.warning("Operation failed (attempt %d/%d): %s. Retrying in %.2fs...", attempt, attempts, exc, delay)
             time.sleep(delay)
-    raise RuntimeError("Unreachable")
+    raise RuntimeError("Unreachable")  # pragma: no cover
 
 
 async def async_with_retry[T](policy: RetryPolicy, operation: Callable[[], Awaitable[T]], exc_types: tuple[type[Exception], ...] = (Exception,)) -> T:
@@ -61,7 +61,7 @@ async def async_with_retry[T](policy: RetryPolicy, operation: Callable[[], Await
             delay = policy.backoff_delay(attempt)
             LOGGER.warning("Async operation failed (attempt %d/%d): %s. Retrying in %.2fs...", attempt, attempts, exc, delay)
             await asyncio.sleep(delay)
-    raise RuntimeError("Unreachable")
+    raise RuntimeError("Unreachable")  # pragma: no cover
 
 
 @dataclass
