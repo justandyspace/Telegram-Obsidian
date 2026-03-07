@@ -678,6 +678,8 @@ def _display_note_name(file_name: str) -> str:
 
 def _preview_text(text: str, max_chars: int = 180) -> str:
     cleaned = _humanize_chunk_text(text)
+    if not cleaned:
+        return "Безопасно сохранил материал, открой заметку для деталей."
     if len(cleaned) <= max_chars:
         return cleaned
     return cleaned[: max_chars - 3].rstrip() + "..."

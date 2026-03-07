@@ -28,6 +28,9 @@ _INLINE_META_RE = re.compile(
 _PROCESSED_RE = re.compile(r"\[\s*Processed in[^\]]*\]", re.IGNORECASE)
 _RELATED_NOTES_RE = re.compile(r"#+\s*Related notes \(auto\).*", re.IGNORECASE | re.DOTALL)
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
+_BOT_LINKS_RE = re.compile(r"<!--\s*BOT_LINKS:START\s*-->.*?<!--\s*BOT_LINKS:END\s*-->", re.DOTALL)
+_URL_STEM_RE = re.compile(r"^\s*https?\s+\S+", re.IGNORECASE)
+_NOTE_ONLY_RE = re.compile(r"^(note(?:\s+\S+)*)$", re.IGNORECASE)
 
 
 @dataclass
@@ -250,6 +253,7 @@ def _hash_text(text: str) -> str:
 def _humanize_chunk_text(text: str) -> str:
     cleaned = str(text or "").replace("\r\n", "\n")
     cleaned = _MANAGED_BLOCK_RE.sub(" ", cleaned)
+    cleaned = _BOT_LINKS_RE.sub(" ", cleaned)
     cleaned = _RELATED_NOTES_RE.sub(" ", cleaned)
     cleaned = cleaned.replace("## 📝 User Content", " ")
     cleaned = cleaned.replace("User Content", " ")
@@ -260,6 +264,10 @@ def _humanize_chunk_text(text: str) -> str:
     cleaned = _HEADING_RE.sub("", cleaned)
     cleaned = " ".join(cleaned.split())
     cleaned = cleaned.strip(" -:#>|")
+    if _NOTE_ONLY_RE.fullmatch(cleaned):
+        return ""
+    if _URL_STEM_RE.match(cleaned):
+        cleaned = ""
     words = cleaned.split()
     if len(words) >= 8 and len(words) % 2 == 0:
         half = len(words) // 2
