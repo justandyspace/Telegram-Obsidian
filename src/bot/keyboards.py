@@ -9,7 +9,6 @@ from src.bot.miniapp import build_mini_app_url
 
 def build_quick_actions_keyboard(mini_app_base_url: str = "") -> ReplyKeyboardMarkup:
     mini_app_url = build_mini_app_url(mini_app_base_url, screen="home")
-    search_url = build_mini_app_url(mini_app_base_url, screen="search")
 
     rows: list[list[KeyboardButton]] = [
         [
@@ -20,8 +19,6 @@ def build_quick_actions_keyboard(mini_app_base_url: str = "") -> ReplyKeyboardMa
     ]
     if mini_app_url:
         rows.append([KeyboardButton(text="📲 База", web_app=WebAppInfo(url=mini_app_url))])
-    elif search_url:
-        rows.append([KeyboardButton(text="📲 База")])
 
     return ReplyKeyboardMarkup(
         keyboard=rows,

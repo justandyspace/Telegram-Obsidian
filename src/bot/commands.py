@@ -133,7 +133,7 @@ def build_command_router(
             "• <code>/find &lt;запрос&gt;</code> для быстрого поиска\n"
             "• <code>/summary &lt;вопрос&gt;</code> для ответа по базе\n"
             "• <code>/status</code> для короткой сводки\n\n"
-            "Через Mini App потом будет удобнее смотреть базу целиком, но для старта чатовых команд уже достаточно.",
+            "Mini App пока ещё не готов, поэтому сейчас всё управление идёт прямо через команды в чате.",
             parse_mode="HTML",
             reply_markup=_quick_actions_markup(),
         )
@@ -184,9 +184,9 @@ def build_command_router(
             "Что можно сделать:\n"
             "• <code>/find запрос</code> для быстрого поиска\n"
             "• <code>/summary вопрос</code> для ответа по базе\n"
-            "• кнопка <b>📲 База</b> для полного поиска и просмотра заметок",
+            "• Mini App пока нет, так что полный поиск тоже временно через чат-команды",
             parse_mode="HTML",
-            reply_markup=_mini_app_markup(label="🔎 Открыть поиск", screen="search"),
+            reply_markup=_quick_actions_markup(),
         )
 
     @router.message(F.text == "🗑 Удаление")
