@@ -346,7 +346,8 @@ def build_command_router(
             if not answer.sources:
                 await message.answer(
                     "🤖 <b>Пока не могу ответить уверенно на этот вопрос.</b>\n"
-                    f"В базе не хватает контекста для: <code>{safe_query}</code>",
+                    "Похоже, в заметках пока нет достаточно ясного материала, чтобы ответить нормально.\n"
+                    f"Попробуй сузить формулировку или добавить больше контекста по теме: <code>{safe_query}</code>",
                     parse_mode="HTML",
                 )
                 return
@@ -354,11 +355,11 @@ def build_command_router(
             source_hits = _dedupe_hits_by_file(answer.sources)
             if answer.mode == "extractive":
                 lines = [
-                    "🧠 <b>Короткий ответ</b>",
+                    "🧠 <b>Что удалось собрать по базе</b>",
                     "",
-                    f"🧠 <b>Вопрос</b>: <code>{safe_query}</code>",
+                    f"Вопрос: <code>{safe_query}</code>",
                     CARD_DIVIDER,
-                    "Нашёл несколько заметок по теме. Самое полезное:",
+                    "Нашёл несколько заметок по теме. Вот что выглядит самым полезным и близким к твоему вопросу:",
                     "",
                 ]
                 for idx, src in enumerate(source_hits[:3], start=1):
@@ -367,7 +368,9 @@ def build_command_router(
                     lines.append(f"{idx}. <b>{safe_file}</b>")
                     lines.append(f"   {snippet}")
                 lines.append("")
-                lines.append("📚 <b>Источники</b>")
+                lines.append("Если хочешь, могу потом помочь углубиться в любой из этих материалов.")
+                lines.append("")
+                lines.append("📚 <b>Откуда это взято</b>")
                 for idx, src in enumerate(source_hits[:4], start=1):
                     safe_file = html.escape(_source_label(src.file_name, idx))
                     lines.append(f"• <code>{safe_file}</code>")
@@ -378,13 +381,13 @@ def build_command_router(
                 )
                 return
             lines = [
-                "🧠 <b>Короткий ответ</b>",
+                "🧠 <b>Ответ по заметкам</b>",
                 "",
-                f"🧠 <b>Вопрос</b>: <code>{safe_query}</code>",
+                f"Вопрос: <code>{safe_query}</code>",
                 CARD_DIVIDER,
                 f"{safe_answer}",
                 "",
-                "📚 <b>На основе заметок</b>",
+                "📚 <b>Опирался на заметки</b>",
             ]
             for idx, src in enumerate(source_hits[:4], start=1):
                 safe_file = html.escape(_source_label(src.file_name, idx))
@@ -400,7 +403,12 @@ def build_command_router(
         if not latest:
             await message.answer("📭 База знаний пока пуста.", parse_mode="HTML")
             return
-        lines = ["🤖 <b>Сейчас покажу последние записи из базы.</b>", "", "📋 <b>Последние записи</b>", CARD_DIVIDER]
+        lines = [
+            "🤖 <b>Вот что у тебя добавлялось последним.</b>",
+            "",
+            "📋 <b>Последние записи</b>",
+            CARD_DIVIDER,
+        ]
         for idx, item in enumerate(latest, start=1):
             safe_file = html.escape(item.get("display_name") or humanize_note_label(item["file_name"]))
             safe_snippet = html.escape(item['snippet'])
@@ -683,7 +691,7 @@ def _source_label(file_name: str, index: int) -> str:
 def _preview_text(text: str, max_chars: int = 180) -> str:
     cleaned = _humanize_chunk_text(text)
     if not cleaned:
-        return "Безопасно сохранил материал, открой заметку для деталей."
+        return "Сохранил материал, но в коротком фрагменте здесь нечего показать. Если хочешь, можно открыть саму заметку."
     if len(cleaned) <= max_chars:
         return cleaned
     return cleaned[: max_chars - 3].rstrip() + "..."
