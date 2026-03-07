@@ -325,6 +325,17 @@ class StateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_all_notes(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT tenant_id, content_fingerprint, note_id, file_name, last_job_id
+                FROM notes_mt
+                ORDER BY tenant_id ASC, updated_at DESC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def delete_all_note_records(self, *, tenant_id: str) -> int:
         with self._connect() as conn:
             result = conn.execute(

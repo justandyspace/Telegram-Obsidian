@@ -18,6 +18,7 @@ from src.infra.health import HealthServer
 from src.infra.logging import configure_logging, get_logger
 from src.infra.runtime_state import record_error
 from src.infra.storage import StateStore
+from src.infra.tenancy import tenant_vault_path
 from src.pipeline.ai_service import AIService
 from src.pipeline.jobs import JobService
 from src.rag.retriever import RagManager
@@ -25,6 +26,39 @@ from src.watcher import run_watcher
 from src.worker import run_worker
 
 LOGGER = get_logger(__name__)
+
+
+def _migrate_shared_notes_to_tenant_dirs(config: AppConfig, store: StateStore, rag_manager: RagManager) -> int:
+    if not config.multi_tenant_mode:
+        return 0
+
+    moved = 0
+    base_vault = config.vault_path.resolve()
+    for note in store.list_all_notes():
+        tenant_id = str(note.get("tenant_id") or "").strip()
+        file_name = str(note.get("file_name") or "").strip()
+        if not tenant_id or not file_name:
+            continue
+
+        source_path = (base_vault / file_name).resolve()
+        target_dir = tenant_vault_path(base_vault, tenant_id, multi_tenant=True)
+        target_path = (target_dir / file_name).resolve()
+        if source_path == target_path:
+            continue
+        if not source_path.exists() or target_path.exists():
+            continue
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        source_path.replace(target_path)
+        rag_manager.for_tenant(tenant_id).index_note(target_path)
+        moved += 1
+
+    if moved:
+        LOGGER.warning(
+            "Moved %s shared notes into tenant-specific vault folders to restore data isolation.",
+            moved,
+        )
+    return moved
 
 
 def _build_dispatcher(config: AppConfig, store: StateStore, rag_manager: RagManager) -> Dispatcher:
@@ -244,6 +278,7 @@ async def _async_main(role_override: str | None) -> None:
         gemini_generation_model=config.gemini_generation_model,
     )
     try:
+        _migrate_shared_notes_to_tenant_dirs(config, store, rag_manager)
         LOGGER.info("Starting role=%s", config.role)
         if config.role == "bot":
             await _run_bot_loop(config, store, rag_manager)

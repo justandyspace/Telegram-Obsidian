@@ -137,6 +137,31 @@ class MainRuntimeTests(unittest.TestCase):
         build_router.assert_called_once()
         self.assertEqual(fake_dispatcher.included, ["router"])
 
+    def test_migrate_shared_notes_to_tenant_dirs_moves_root_notes(self) -> None:
+        config = AppConfig(
+            **{**self.config.__dict__, "multi_tenant_mode": True}
+        )
+        root_note = config.vault_path / "shared.md"
+        root_note.parent.mkdir(parents=True, exist_ok=True)
+        root_note.write_text("hello", encoding="utf-8")
+
+        store = MagicMock()
+        store.list_all_notes.return_value = [
+            {"tenant_id": "tg_1", "file_name": "shared.md"},
+        ]
+
+        tenant_service = MagicMock()
+        rag_manager = MagicMock()
+        rag_manager.for_tenant.return_value = tenant_service
+
+        moved = main_module._migrate_shared_notes_to_tenant_dirs(config, store, rag_manager)
+
+        self.assertEqual(moved, 1)
+        tenant_note = config.vault_path / "tg_1" / "shared.md"
+        self.assertTrue(tenant_note.exists())
+        self.assertFalse(root_note.exists())
+        tenant_service.index_note.assert_called_once_with(tenant_note.resolve())
+
     def test_run_polling_forever_handles_retry_and_cleanup(self) -> None:
         readiness: list[bool] = []
         fake_bot = _FakeBot("token")

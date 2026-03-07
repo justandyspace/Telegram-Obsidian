@@ -74,7 +74,7 @@ def load_config() -> AppConfig:
     if role in {"bot", "standalone"}:
         token = _required("TELEGRAM_TOKEN", token)
 
-    multi_tenant_mode = os.getenv("TENANT_MODE", "single").strip().lower() == "multi"
+    configured_multi_tenant = os.getenv("TENANT_MODE", "single").strip().lower() == "multi"
     telegram_mode = os.getenv("TELEGRAM_MODE", "auto").strip().lower()
     if telegram_mode not in {"auto", "polling", "webhook"}:
         raise RuntimeError("TELEGRAM_MODE must be one of: auto, polling, webhook.")
@@ -111,6 +111,7 @@ def load_config() -> AppConfig:
         )
 
     allowed_user_id = allowed_user_ids[0] if allowed_user_ids else 0
+    multi_tenant_mode = configured_multi_tenant or len(set(allowed_user_ids)) > 1
 
     vault_path = Path(os.getenv("VAULT_PATH", "/data/vault")).resolve()
     state_dir = Path(os.getenv("STATE_DIR", "/srv/obsidian-bot/state")).resolve()

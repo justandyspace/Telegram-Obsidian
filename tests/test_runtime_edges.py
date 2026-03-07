@@ -229,6 +229,7 @@ class RuntimeEdgeTests(unittest.TestCase):
         with patch.dict(os.environ, valid_env, clear=True):
             config = load_config()
             self.assertEqual(config.telegram_allowed_user_ids, (11, 12))
+            self.assertTrue(config.multi_tenant_mode)
             self.assertEqual(config.webhook_path, "/hook")
             self.assertEqual(config.state_db_path.name, "bot_state.sqlite3")
 
