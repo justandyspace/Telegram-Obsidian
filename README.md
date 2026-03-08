@@ -1,12 +1,9 @@
 # Telegram-Obsidian
 
 <p align="center">
-  <img src="https://github.com/justandyspace.png" alt="justandyspace avatar" width="96" height="96" />
-</p>
-<p align="center"><strong>justandyspace</strong></p>
-
 [![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+</p>
 
 Turn Telegram into a structured capture layer for Obsidian.
 
