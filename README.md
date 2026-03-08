@@ -1,9 +1,5 @@
 # Telegram-Obsidian
 
-<p align="center">
-[![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-</p>
-
 Turn Telegram into a structured capture layer for Obsidian.
 
 Telegram-Obsidian ingests text, links, voice messages, and media from Telegram, converts them into searchable Markdown notes, and stores them directly in your Obsidian vault.
@@ -54,15 +50,15 @@ It is built for self-hosted use. Your data stays local, Docker support is includ
 
 ## Project Structure
 
-- `src/main.py` - entrypoint for the `bot`, `worker`, and `watcher` roles.
-- `src/bot` - Telegram routing and commands.
-- `src/pipeline` - normalization, actions, and queue handling.
-- `src/parsers` - URL parsing and guarded fetch logic.
-- `src/obsidian` - note routing and writing.
-- `src/rag` - indexing, retrieval, and answers.
-- `src/infra` - config, logging, health, and storage.
-- `tests` - automated tests.
-- `deploy` - deployment artifacts, including systemd unit files.
+- `src/main.py` — entrypoint for the `bot`, `worker`, and `watcher` roles.
+- `src/bot` — Telegram routing and commands.
+- `src/pipeline` — normalization, actions, and queue handling.
+- `src/parsers` — URL parsing and guarded fetch logic.
+- `src/obsidian` — note routing and writing.
+- `src/rag` — indexing, retrieval, and answers.
+- `src/infra` — config, logging, health, and storage.
+- `tests` — automated tests.
+- `deploy` — deployment artifacts, including systemd unit files.
 
 ## Quick Start
 
@@ -73,7 +69,7 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-Windows:
+**Windows:**
 
 ```powershell
 py -m venv .venv
@@ -82,7 +78,7 @@ pip install -r requirements-dev.txt
 Copy-Item .env.example .env
 ```
 
-Linux / macOS:
+**Linux / macOS:**
 
 ```bash
 python3 -m venv .venv
@@ -144,22 +140,16 @@ For watcher fallback polling:
 
 ## Telegram Commands
 
-- `/start` - help and feature overview.
-- `/status` - queue state, errors, and RAG/storage stats.
-- `/find <query>` - semantic/keyword note search.
-- `/summary <question>` - grounded summary over the index.
-- `/retry <job_id_or_prefix>` - manually retry a job.
-- `/delete <note_id|job_id_prefix|file_name>` - delete a note (file + index + DB record).
+- `/start` — help and feature overview.
+- `/status` — queue state, errors, and RAG/storage stats.
+- `/find <query>` — semantic/keyword note search.
+- `/summary <question>` — grounded summary over the index.
+- `/retry <job_id_or_prefix>` — manually retry a job.
+- `/delete <note_id|job_id_prefix|file_name>` — delete a note (file + index + DB record).
 
 If `MINI_APP_BASE_URL` is set, the bot adds WebApp CTA buttons to `/start`, `/status`, `/find`, and `/summary`.
 
-Messages can include action tags:
-
-- `#save`
-- `#summary`
-- `#task`
-- `#resummarize`
-- `#translate`
+Messages can include action tags: `#save`, `#summary`, `#task`, `#resummarize`, `#translate`.
 
 ## Quality and Verification
 
