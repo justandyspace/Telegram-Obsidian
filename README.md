@@ -1,8 +1,15 @@
+<div align="center">
+
 # Telegram-Obsidian
 
-Turn Telegram into a structured capture layer for Obsidian.
+### Turn Telegram into a structured capture layer for Obsidian
+
+[![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 
 Telegram-Obsidian ingests text, links, voice messages, and media from Telegram, converts them into searchable Markdown notes, and stores them directly in your Obsidian vault.
+
+</div>
 
 ## Why Telegram-Obsidian
 
@@ -12,11 +19,13 @@ It is built for self-hosted use. Your data stays local, Docker support is includ
 
 ## What It Does
 
-- Captures text, links, voice messages, and media from Telegram.
-- Converts incoming content into structured Markdown notes inside Obsidian.
-- Indexes saved notes for semantic search and grounded summaries.
-- Runs locally or through Docker Compose.
-- Keeps the pipeline operational with retries, stuck-job recovery, and health endpoints.
+| Capability | Outcome |
+| --- | --- |
+| Telegram capture | Save text, links, voice messages, and media directly from chat |
+| Note generation | Convert incoming content into structured Markdown notes |
+| Search and summary | Index saved notes for semantic retrieval and grounded summaries |
+| Local-first runtime | Run locally or through Docker Compose |
+| Operational safety | Keep the pipeline healthy with retries, recovery, and health endpoints |
 
 ## How It Works
 
@@ -29,24 +38,25 @@ It is built for self-hosted use. Your data stays local, Docker support is includ
 
 ## Key Features
 
-- Strict allowlist-based authorization (`TELEGRAM_ALLOWED_USER_ID(S)`).
-- Support for Telegram modes: `polling`, `webhook`, `auto`.
-- Tenant-isolated storage (`VAULT_PATH`, `INDEX_DIR`, SQLite state).
-- Idempotent job queue with retries and exponential backoff.
-- Automatic recovery for stuck jobs.
-- Safe URL ingestion with SSRF protection.
-- RAG support: semantic search + grounded summaries (`/find`, `/summary`).
-- Built-in health endpoints for bot and worker.
+| Area | Details |
+| --- | --- |
+| Access control | Strict allowlist-based authorization with `TELEGRAM_ALLOWED_USER_ID(S)` |
+| Telegram runtime | Support for `polling`, `webhook`, and `auto` modes |
+| Storage isolation | Tenant-scoped `VAULT_PATH`, `INDEX_DIR`, and SQLite state |
+| Queue reliability | Idempotent jobs, retries, exponential backoff, and stuck-job recovery |
+| Safe ingestion | URL handling with SSRF protection |
+| Retrieval | Semantic search and grounded summaries via `/find` and `/summary` |
+| Health | Built-in bot and worker health endpoints |
 
 ## Technology Stack
 
-- Python 3.12+
-- aiogram 3
-- aiohttp
-- BeautifulSoup / pypdf / youtube-transcript-api
-- Gemini API (optional, for embeddings and generation)
-- SQLite
-- Docker Compose
+| Layer | Tools |
+| --- | --- |
+| Runtime | Python 3.12+, aiogram 3, aiohttp |
+| Parsing | BeautifulSoup, pypdf, youtube-transcript-api |
+| Intelligence | Gemini API (optional, for embeddings and generation) |
+| Storage | SQLite |
+| Deployment | Docker Compose |
 
 ## Project Structure
 
