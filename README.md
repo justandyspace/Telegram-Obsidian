@@ -1,11 +1,12 @@
 # Telegram-Obsidian
 
-[![Release](https://img.shields.io/github/v/release/justandyspace/telegram-obsidian?label=release)](https://github.com/justandyspace/telegram-obsidian/releases)
-[![License](https://img.shields.io/github/license/justandyspace/telegram-obsidian)](https://github.com/justandyspace/telegram-obsidian/blob/main/LICENSE)
+<p align="center">
+  <img src="https://github.com/justandyspace.png" alt="justandyspace avatar" width="96" height="96" />
+</p>
+<p align="center"><strong>justandyspace</strong></p>
+
 [![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-
-**Author:** [justandyspace](https://github.com/justandyspace)
 
 Turn Telegram into a structured capture layer for Obsidian.
 
@@ -173,8 +174,6 @@ bandit -q -c pyproject.toml -r src
 pip-audit -r requirements.txt
 pytest -q
 ```
-
-CI: `.github/workflows/ci.yml`
 
 ## Security and Reliability
 
