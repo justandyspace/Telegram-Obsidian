@@ -1,25 +1,19 @@
-# VaultPulse OSS
+# Telegram-Obsidian
 
 [![Release](https://img.shields.io/github/v/release/justandyspace/telegram-obsidian?label=release)](https://github.com/justandyspace/telegram-obsidian/releases)
-[![License](https://img.shields.io/github/license/justandyspace/telegram-obsidian)](https://github.com/justandyspace/telegram-obsidian/blob/main/LICENSE.md)
+[![License](https://img.shields.io/github/license/justandyspace/telegram-obsidian)](https://github.com/justandyspace/telegram-obsidian/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-
-<p align="left">
-  <a href="https://github.com/justandyspace">
-    <img src="https://github.com/justandyspace.png?size=72" alt="justandyspace avatar" width="72" height="72">
-  </a>
-</p>
 
 **Author:** [justandyspace](https://github.com/justandyspace)
 
 Turn Telegram into a structured capture layer for Obsidian.
 
-VaultPulse ingests text, links, voice messages, and media from Telegram, converts them into searchable Markdown notes, and stores them directly in your Obsidian vault.
+Telegram-Obsidian ingests text, links, voice messages, and media from Telegram, converts them into searchable Markdown notes, and stores them directly in your Obsidian vault.
 
-## Why VaultPulse
+## Why Telegram-Obsidian
 
-Telegram is convenient for capturing ideas, but it quickly becomes an unstructured archive of links, files, half-finished thoughts, and voice notes. VaultPulse turns that stream into something usable: clean notes in Obsidian that you can actually browse, search, and summarize later.
+Telegram is convenient for capturing ideas, but it quickly becomes an unstructured archive of links, files, half-finished thoughts, and voice notes. Telegram-Obsidian turns that stream into something usable: clean notes in Obsidian that you can actually browse, search, and summarize later.
 
 It is built for self-hosted use. Your data stays local, Docker support is included, and the ingestion pipeline is designed to keep running reliably instead of falling apart on retries, stuck jobs, or malformed inputs.
 
